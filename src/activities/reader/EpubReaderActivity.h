@@ -60,6 +60,9 @@ class EpubReaderActivity final : public ReaderActivity {
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;
+  // The phone-sync read mark has been decided for this visit (see loop()).
+  bool articleMarkedRead = false;
+  std::atomic<bool> articleCompletionShown{false};
   unsigned long bookmarkMessageTime = 0UL;
   bool pendingReadFolderMove = false;
 

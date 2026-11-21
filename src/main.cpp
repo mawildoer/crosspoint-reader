@@ -16,6 +16,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <PhoneSync.h>
 #include <SPI.h>
 #include <TrustedTime.h>
 #include <VectorFontSupport.h>
@@ -26,6 +27,7 @@
 #include <esp_wifi.h>
 #include <time.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdarg>
 #include <cstring>
@@ -253,6 +255,21 @@ void handleSlideSwitch() {
   activityManager.requestUpdate();
   LOG_INF("SWITCH", "Slide switch %s", on ? "on" : "off");
 }
+
+// Phone sync (lib/PhoneSync): what the module may ask of this firmware.
+namespace phonesynchost {
+std::atomic<bool> holdsCpu{false};
+uint8_t batteryPercent() { return static_cast<uint8_t>(std::min<uint16_t>(powerManager.getBatteryPercentage(), 100)); }
+void holdFullSpeed(const bool hold) {
+  holdsCpu.store(hold);
+  if (hold) powerManager.setPowerSaving(false);
+}
+bool buttonPressed() {
+  gpio.update();
+  return gpio.wasAnyPressed();
+}
+const phonesync::Host host{batteryPercent, holdFullSpeed, buttonPressed, CROSSPOINT_VERSION};
+}  // namespace phonesynchost
 
 // Bluetooth page turner (lib/BlePageTurner): what the module may ask of this firmware. The module
 // owns the radio; loop() tells it what is on screen, and the screen changes and sleep ask it to stop.
@@ -483,6 +500,9 @@ void enterDeepSleep(bool fromTimeout = false) {
     Storage.remove(SLEEP_FRAME_FILE);
   }
 
+  // The sleep screen is up: give the phone a short window to deliver before the radio goes.
+  phonesync::syncBeforeSleep();
+
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -675,6 +695,7 @@ void setup() {
   // timestamps, loan-expiry checks).
   trustedtime::init();
   bleturner::begin(pageturner::host, SETTINGS.ble);
+  phonesync::begin(phonesynchost::host);
 
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
@@ -689,6 +710,8 @@ void setup() {
       }
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
+      // X3 should boot for reading and sync when the cable supplies power.
+      if (gpio.deviceIsX3()) break;
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
@@ -856,6 +879,11 @@ void loop() {
   scene.storageBusy = activityManager.requiresExclusiveStorageLoop();
   scene.wifiOn = WiFi.getMode() != WIFI_MODE_NULL;
   const bool remoteActed = bleturner::tick(scene);
+  phonesync::tick(activityManager.isForegroundArticles() ? phonesync::Where::Articles
+                  : homeShown                            ? phonesync::Where::Home
+                  : activityManager.isReaderActivity()   ? phonesync::Where::Reader
+                                                         : phonesync::Where::Elsewhere,
+                  scene.storageBusy, scene.wifiOn);
 
   if (activityManager.requiresExclusiveStorageLoop()) {
     // USB Drive handed the raw SD card to the host. Do not run screenshots,
@@ -967,6 +995,8 @@ void loop() {
   const bool x4ProDoubleClickEnabled = BoardConfig::isX4Pro() && SETTINGS.doublePwrBtn != CrossPointSettings::IGNORE;
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
+  // Refresh the inactivity clock while powered so unplugging starts a full timeout.
+  if (gpio.deviceIsX3() && gpio.isUsbConnected()) lastActivityTime = millis();
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
@@ -1061,7 +1091,8 @@ void loop() {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {
-    if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS && !pageturner::holdsCpu.load()) {
+    if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS && !pageturner::holdsCpu.load() &&
+        !phonesynchost::holdsCpu.load()) {
       // If we've been inactive for a while, increase the delay to save power
       powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
       // Sleep in short slices and wake the poll as soon as a button contact closes.

@@ -4,7 +4,7 @@
 
 #include "activities/UiListActivity.h"
 
-enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_DRIVE, OPDS_BROWSER };
+enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_DRIVE, OPDS_BROWSER, PLUGINS };
 
 /**
  * NetworkModeSelectionActivity presents the user with a choice:
@@ -12,7 +12,7 @@ enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_DRIV
  * - "Calibre Wireless" - Use Calibre wireless device transfers
  * - "Create Hotspot" - Create an Access Point that others can connect to (AP mode)
  * - "OPDS Browser" - Browse OPDS catalogs, or add a server when none is configured.
- *   Hidden while Home shows it (plugins off and a server configured).
+ * - "Plugins" - Open installed plugins when enabled.
  * - "USB Drive" - Expose the SD card over USB (boards with USB mass storage)
  *
  * The onModeSelected callback is called with the user's choice.
@@ -25,9 +25,9 @@ class NetworkModeSelectionActivity final : public UiListActivity {
   explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
 #if FREEINK_CAP_USB_MSC
-  static constexpr int MAX_ITEM_COUNT = 5;
+  static constexpr int MAX_ITEM_COUNT = 6;
 #else
-  static constexpr int MAX_ITEM_COUNT = 4;
+  static constexpr int MAX_ITEM_COUNT = 5;
 #endif
 
   void onModeSelected(NetworkMode mode);

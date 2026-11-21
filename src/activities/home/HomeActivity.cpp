@@ -253,6 +253,7 @@ void HomeActivity::onEnter() {
     coverGridUi->begin(recentBooks,
                        slot == HomeMenuItem::PLUGINS        ? CoverGridHomeUi::SlotTab::PLUGINS
                        : slot == HomeMenuItem::OPDS_BROWSER ? CoverGridHomeUi::SlotTab::OPDS
+                       : slot == HomeMenuItem::ARTICLES     ? CoverGridHomeUi::SlotTab::OPDS
                                                             : CoverGridHomeUi::SlotTab::NONE,
                        hasContinueReading);
   }
@@ -329,6 +330,9 @@ void HomeActivity::loop() {
         break;
       case HomeMenuItem::PLUGINS:
         onPluginsOpen();
+        break;
+      case HomeMenuItem::ARTICLES:
+        activityManager.goToArticles();
         break;
       case HomeMenuItem::OPDS_BROWSER:
         onOpdsBrowserOpen();
@@ -554,8 +558,11 @@ void HomeActivity::render(RenderLock&&) {
   std::vector<UIIcon> menuIcons = {Folder, Library, Transfer, Settings};
 
   if (slotItem() != HomeMenuItem::NONE) {
-    menuItems.insert(menuItems.begin() + 2, hasPlugins ? tr(STR_PLUGINS) : tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, hasPlugins ? Plugins : Book);
+    const HomeMenuItem slot = slotItem();
+    menuItems.insert(menuItems.begin() + 2, slot == HomeMenuItem::ARTICLES  ? tr(STR_PAPERBOY_ARTICLES)
+                                            : slot == HomeMenuItem::PLUGINS ? tr(STR_PLUGINS)
+                                                                            : tr(STR_OPDS_BROWSER));
+    menuIcons.insert(menuIcons.begin() + 2, slot == HomeMenuItem::PLUGINS ? Plugins : Book);
   }
 
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {

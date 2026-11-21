@@ -1,5 +1,6 @@
 #include "EpubReaderActivity.h"
 
+#include <ArticleStore.h>
 #include <BlePageTurner.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
@@ -799,6 +800,14 @@ void EpubReaderActivity::loop() {
 
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
   clearEndOfBookOptionsIfNeeded();
+
+  // The render task publishes completion only after displaying the final page.
+  if (!articleMarkedRead && articleCompletionShown.load(std::memory_order_acquire)) {
+    char articleId[phonesync::store::kIdHexLen + 1];
+    if (!phonesync::store::idOfPath(epub->getPath().c_str(), articleId) || phonesync::store::markRead(articleId)) {
+      articleMarkedRead = true;
+    }
+  }
 
   if (SETTINGS.removeReadBooksFromRecents) {
     if (atEndOfBook && !recentsEntryRemoved) {
@@ -2019,6 +2028,11 @@ void EpubReaderActivity::renderBook() {
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
     markPageRendered();
+    if (!section->isBuilding() && !section->isPartial() && section->pageCount > 0 &&
+        currentSpineIndex == epub->getSpineItemsCount() - 1 &&
+        section->currentPage >= static_cast<int>(section->pageCount) - 1) {
+      articleCompletionShown.store(true, std::memory_order_release);
+    }
   }
 
   const int estimatedTotalPages = section->estimatedTotalPages();
@@ -2079,6 +2093,7 @@ void EpubReaderActivity::renderBook() {
 }
 
 void EpubReaderActivity::onEndOfBookRendered() {
+  articleCompletionShown.store(true, std::memory_order_release);
   automaticPageTurnActive = false;
   if (pendingSyncSaveError) {
     pendingSyncSaveError = false;

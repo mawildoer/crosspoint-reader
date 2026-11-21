@@ -24,6 +24,7 @@ constexpr ModeRow MODE_ROWS[] = {
     {NetworkMode::CONNECT_CALIBRE, StrId::STR_CALIBRE_WIRELESS, StrId::STR_CALIBRE_DESC, UIIcon::Library},
     {NetworkMode::CREATE_HOTSPOT, StrId::STR_CREATE_HOTSPOT, StrId::STR_HOTSPOT_DESC, UIIcon::Hotspot},
     {NetworkMode::OPDS_BROWSER, StrId::STR_OPDS_BROWSER, StrId::STR_OPDS_DESC, UIIcon::Book},
+    {NetworkMode::PLUGINS, StrId::STR_PLUGINS, StrId::STR_PLUGINS, UIIcon::Book},
 #if FREEINK_CAP_USB_MSC
     {NetworkMode::USB_DRIVE, StrId::STR_USB_DRIVE, StrId::STR_USB_DRIVE_DESC, UIIcon::Usb},
 #endif
@@ -33,13 +34,11 @@ static_assert(sizeof(MODE_ROWS) / sizeof(MODE_ROWS[0]) == NetworkModeSelectionAc
 
 NetworkModeSelectionActivity::NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : UiListActivity("NetworkModeSelection", renderer, mappedInput) {
-  // Home shows OPDS in its Plugins slot while plugins are off and a server
-  // exists, so the row is listed here only in the other cases.
-  const bool opdsOnHome = !SETTINGS.pluginsEnabled && OPDS_STORE.hasServers();
+  // Home reserves its extra slot for Articles; OPDS remains available here.
   // Static for the screen's lifetime, so built once here rather than every
   // buildScreen() call.
   for (const ModeRow& row : MODE_ROWS) {
-    if (row.mode == NetworkMode::OPDS_BROWSER && opdsOnHome) continue;
+    if (row.mode == NetworkMode::PLUGINS && !SETTINGS.pluginsEnabled) continue;
     fui::ListItem item;
     item.label = I18N.get(row.label);
     item.subtitle = I18N.get(row.desc);

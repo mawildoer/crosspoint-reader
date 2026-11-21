@@ -22,10 +22,9 @@ class HomeActivity final : public Activity {
   // The home "library" slot (index 2) shows Plugins while the plugin system is
   // enabled, otherwise OPDS when a server is configured. NONE hides the slot.
   // NetworkModeSelectionActivity lists OPDS in exactly the other cases.
-  HomeMenuItem slotItem() const {
-    if (hasPlugins) return HomeMenuItem::PLUGINS;
-    return hasOpdsServers ? HomeMenuItem::OPDS_BROWSER : HomeMenuItem::NONE;
-  }
+  // This firmware gives the slot to Articles (lib/PhoneSync); Plugins and OPDS
+  // stay reachable from File Transfer.
+  HomeMenuItem slotItem() const { return HomeMenuItem::ARTICLES; }
   bool hasContinueReading = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored

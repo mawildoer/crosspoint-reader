@@ -1,0 +1,11 @@
+{
+  "name": "PhoneSync",
+  "version": "0.1.0",
+  "description": "Bluetooth LE peripheral that receives articles from the Paperboy phone app and keeps them on the SD card.",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include"
+  },
+  "frameworks": "*",
+  "platforms": "*"
+}

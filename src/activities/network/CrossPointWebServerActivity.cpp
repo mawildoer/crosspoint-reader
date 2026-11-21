@@ -161,12 +161,16 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
 
   // The OPDS browser joins Wi-Fi itself. Wi-Fi is still on if the user backed
   // out of Join Network; turn it off so onExit does not restart to Home.
-  if (mode == NetworkMode::OPDS_BROWSER) {
+  if (mode == NetworkMode::OPDS_BROWSER || mode == NetworkMode::PLUGINS) {
     if (WiFi.getMode() != WIFI_MODE_NULL) {
       WiFi.disconnect(false);
       WiFi.mode(WIFI_OFF);
     }
-    activityManager.goToBrowser();
+    if (mode == NetworkMode::PLUGINS) {
+      activityManager.goToPlugins();
+    } else {
+      activityManager.goToBrowser();
+    }
     return;
   }
 

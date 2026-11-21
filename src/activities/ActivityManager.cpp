@@ -7,6 +7,7 @@
 #include <HalDisplay.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
+#include <PhoneSync.h>
 #include <VectorFontSupport.h>
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include "CrossPointSettings.h"
 #include "HapticFeedback.h"
 #include "OpdsServerStore.h"
+#include "articles/ArticlesActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -310,6 +312,15 @@ void ActivityManager::goToLibrary() {
   replaceActivity(std::move(activity));
 }
 
+void ActivityManager::goToArticles() {
+  auto activity = makeUniqueNoThrow<ArticlesActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: articles activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
   // Skip the server picker when there's only one server configured
@@ -340,6 +351,9 @@ void ActivityManager::goToReader(std::string path, const bool allowFastInitialRe
     return;
   }
 
+  // The reader needs the heap the phone-sync radio holds.
+  phonesync::stop(2000);
+
   auto activity = ReaderActivity::create(renderer, mappedInput, std::move(path), allowFastInitialRefresh);
   if (activity) {
     replaceActivity(std::move(activity));
@@ -365,6 +379,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "Library") {
       initialMenuItem = HomeMenuItem::LIBRARY;
+    } else if (activityName == "Articles") {
+      initialMenuItem = HomeMenuItem::ARTICLES;
     } else if (activityName == "PluginCatalog") {
       initialMenuItem = HomeMenuItem::PLUGINS;
     } else if (activityName == "OpdsBookBrowser") {
@@ -428,6 +444,10 @@ bool ActivityManager::remoteClick(const RemoteButton button) {
 bool ActivityManager::isForegroundHomeShown() const {
   return pendingAction == PendingAction::None && currentActivity && currentActivity->name == "Home" &&
          paintedVisit.load(std::memory_order_acquire) == screenVisit;
+}
+
+bool ActivityManager::isForegroundArticles() const {
+  return pendingAction == PendingAction::None && currentActivity && currentActivity->name == "Articles";
 }
 
 bool ActivityManager::remoteShortcut(const bool readerMenu) {
