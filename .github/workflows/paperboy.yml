@@ -1,0 +1,113 @@
+name: Paperboy firmware
+
+on:
+  push:
+    branches: ['feat/paperboy']
+    tags: ['paperboy-v*']
+  pull_request:
+    branches: ['feat/paperboy']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paperboy-firmware-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'mawildoer/crosspoint-reader'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Install pinned PlatformIO toolchain
+        run: |
+          uv pip install --system https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+          uv pip install --system "littlefs-python>=0.16.0" "fatfs-ng>=0.1.14" "pyyaml>=6.0.2" \
+            "rich-click>=1.8.6" "zopfli>=0.2.2" "intelhex>=2.3.0" "rich>=14.0.0" "urllib3<2" \
+            "cryptography>=45.0.3" "certifi>=2025.8.3" "ecdsa>=0.19.1" "bitstring>=4.3.1" \
+            "reedsolo>=1.5.3,<1.8" "esp-idf-size>=2.0.0" "esp-coredump>=1.14.0"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: paperboy-pio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'scripts/patch_pioarduino_cache.py') }}
+      - name: Set firmware version
+        env:
+          BUILD_REF: ${{ github.ref }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          ref = os.environ['BUILD_REF']
+          version = '2.0.0-paperboy.' + os.environ['GITHUB_SHA'][:7]
+          if ref.startswith('refs/tags/paperboy-v'):
+              version = ref.removeprefix('refs/tags/paperboy-v')
+              if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?', version):
+                  raise SystemExit('Expected a paperboy-v<major>.<minor>.<patch> release tag')
+              version += '-paperboy'
+          Path('platformio.local.ini').write_text('[crosspoint]\nversion = ' + version + '\n')
+          PY
+      - name: Run article storage checks
+        run: test/paperboy_host/run.sh
+      - name: Run library index and format tests
+        run: |
+          cmake -S test -B /tmp/paperboy-tests
+          cmake --build /tmp/paperboy-tests --target LibraryIndexFileTest LibraryFormatTest -j2
+          /tmp/paperboy-tests/library_index_file/LibraryIndexFileTest
+          /tmp/paperboy-tests/library_format/LibraryFormatTest
+      - name: Pin nested PlatformIO core
+        run: |
+          pio pkg install -e gh_release
+          uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
+      - name: Build X3 firmware
+        run: pio run -e gh_release -j2
+      - name: Package firmware and notices
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          mkdir -p dist
+          cp .pio/build/gh_release/firmware.bin dist/paperboy-x3-update.bin
+          python3 scripts/build_release_license.py --env gh_release --repository "$SOURCE_REPOSITORY" --output dist/LICENSE
+          printf 'Source: https://github.com/%s/tree/%s\nUpdate binary offset: 0x10000\nTarget: Xteink X3 (the shared X3/X4 profile); X4 hardware unverified.\n' \
+            "$SOURCE_REPOSITORY" "$GITHUB_SHA" > dist/BUILD.txt
+          (cd dist && sha256sum paperboy-x3-update.bin LICENSE BUILD.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: paperboy-x3-firmware
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: github.repository == 'mawildoer/crosspoint-reader' && startsWith(github.ref, 'refs/tags/paperboy-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: paperboy-x3-firmware
+          path: dist
+      - name: Publish firmware release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$SOURCE_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$SOURCE_REPOSITORY" --verify-tag \
+              --title "Paperboy firmware $RELEASE_TAG" \
+              --notes 'Paperboy firmware for Xteink X3. The update binary is written at 0x10000; it does not include the bootloader or partition table. See BUILD.txt for the source revision and SHA256SUMS for integrity checks.'
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --repo "$SOURCE_REPOSITORY" --clobber

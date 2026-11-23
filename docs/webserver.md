@@ -20,7 +20,8 @@ networks or in hotspot mode when you control who is connected.
 
 ## Starting File Transfer
 
-1. From the Home screen, select **File Transfer**.
+1. From the Library Home screen, open **Menu → File Transfer**. Press **Back** at the tab strip,
+   or hold **Back** from within the list, to open Menu.
 2. Choose one of the available modes:
 
 | Mode | Use when |

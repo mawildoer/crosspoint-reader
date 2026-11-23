@@ -4,6 +4,7 @@
 
 #include <HalMemory.h>
 #include <HalStorage.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <NimBLEDevice.h>
@@ -275,6 +276,7 @@ void onPutEnd() {
   if (status == Ok) {
     receivedThisBoot++;
     generation++;
+    library::markLibraryIndexDirty();
     freeSpaceStale = true;
   } else {
     Storage.remove(store::kIncomingPath);
@@ -295,6 +297,7 @@ void onDelete(const uint8_t* payload, const size_t len) {
   const bool ok = store::remove(idHex);
   if (ok) {
     generation++;
+    library::markLibraryIndexDirty();
     freeSpaceStale = true;
   }
   sendStatus(DeleteResult, ok ? Ok : StorageError);
@@ -486,8 +489,8 @@ void begin(const Host& h) {
 
 void tick(const Where where, const bool storageBusy, const bool wifiOn) {
   if (!begun) return;
-  const bool syncScreen = where == Where::Home || where == Where::Articles;
-  const bool wasSyncScreen = lastWhere == Where::Home || lastWhere == Where::Articles;
+  const bool syncScreen = where == Where::Home || where == Where::Articles || where == Where::Library;
+  const bool wasSyncScreen = lastWhere == Where::Home || lastWhere == Where::Articles || lastWhere == Where::Library;
   // Coming back to Home or Articles asks again; so does moving between them.
   if (syncScreen && (!wasSyncScreen || where != lastWhere)) idleStopped = false;
   lastWhere = where;
@@ -507,7 +510,7 @@ void tick(const Where where, const bool storageBusy, const bool wifiOn) {
     byeAtMs = 0;
     // On Articles the link stays: an article loaded on the phone a moment later arrives at once.
     // The phone keeps the connection and starts another session when it has something.
-    if (where != Where::Articles || !linked.load()) {
+    if ((where != Where::Articles && where != Where::Library) || !linked.load()) {
       // Elsewhere the phone is done. Stay off until the next visit, or it would reconnect in a loop.
       stopRadio();
       idleStopped = true;

@@ -37,6 +37,39 @@ TEST(LibraryIndexFile, MissingIndexDoesNotCloseAnUninitializedHandle) {
   EXPECT_EQ(HalFile::invalidCloseCount(), 0);
 }
 
+TEST(LibraryIndexFile, FindsArticleFolderAmongManyFolders) {
+  library::ClixHeader header{};
+  std::memcpy(header.magic, library::CLIX_MAGIC, sizeof(header.magic));
+  header.formatVersion = library::CLIX_FORMAT_VERSION;
+  header.foldVersion = library::CLIX_FOLD_VERSION;
+  header.bookCount = 4096;
+  header.folderCount = 4096;
+  std::vector<uint8_t> folders;
+  for (int i = 0; i < header.folderCount; ++i) {
+    const std::string path = i == 4095 ? "/Articles" : "/books/" + std::to_string(i);
+    folders.push_back(static_cast<uint8_t>(path.size()));
+    folders.insert(folders.end(), path.begin(), path.end());
+  }
+  library::layoutSections(header, folders.size(), 0);
+  std::vector<uint8_t> bytes(header.selfSize, 0);
+  std::memcpy(bytes.data(), &header, sizeof(header));
+  std::memcpy(bytes.data() + header.folderStart, folders.data(), folders.size());
+  Storage.setFile("/library.clx", bytes);
+  library::LibraryIndexFile index;
+  ASSERT_TRUE(index.open("/library.clx"));
+  EXPECT_EQ(index.findFolderId("/Articles"), 4095);
+  EXPECT_EQ(index.findFolderId("/books/0"), 0);
+  EXPECT_EQ(index.findFolderId("/Article"), 0xFFFF);
+  EXPECT_EQ(index.findFolderId(nullptr), 0xFFFF);
+  index.close();
+  EXPECT_EQ(index.findFolderId("/Articles"), 0xFFFF);
+
+  bytes[header.folderStart] = 0;
+  Storage.setFile("/library.clx", std::move(bytes));
+  ASSERT_TRUE(index.open("/library.clx"));
+  EXPECT_EQ(index.findFolderId("/Articles"), 0xFFFF);
+}
+
 TEST(LibraryIndexFile, ReadsEveryStoredOrderInBothDirections) {
   library::ClixHeader header{};
   std::memcpy(header.magic, library::CLIX_MAGIC, sizeof(header.magic));

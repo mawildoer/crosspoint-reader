@@ -36,6 +36,10 @@ using Visitor = bool (*)(void* ctx, const char* idHex, uint32_t time, const char
 bool forEach(Visitor visit, void* ctx);
 
 bool contains(const char* idHex);
+// One record at a time: no article-count-sized metadata cache.
+bool lookup(const char* idHex, Entry& out);
+void formatSubtitle(const Entry& entry, std::string& out);
+void formatDate(uint32_t timestamp, std::string& out);
 bool append(const char* idHex, uint32_t time, const char* source, size_t sourceLen, const char* title, size_t titleLen,
             const char* author, size_t authorLen);
 // Removes the article file and its index line. True when it is gone (also when it never existed).

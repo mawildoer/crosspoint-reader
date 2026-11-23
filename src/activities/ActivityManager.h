@@ -120,6 +120,7 @@ class ActivityManager {
   bool isForegroundHomeShown() const;
   // The Articles list is in front (phone sync keeps its radio up there).
   bool isForegroundArticles() const;
+  bool isForegroundLibrary() const;
   uint32_t visit() const { return screenVisit; }
   bool remoteTurn(bool forward, bool chapter);
   // A remote button mapped to the reader menu (true) or to a new clipping (false).

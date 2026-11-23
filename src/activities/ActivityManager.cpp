@@ -152,6 +152,8 @@ void ActivityManager::loop() {
   }
 
   while (pendingAction != PendingAction::None) {
+    // Release the radio before another screen allocates buffers or starts Wi-Fi.
+    phonesync::stop(2000);
     // The page turner's radio gives its heap back before the next screen allocates. Its teardown
     // can span loop passes and runs outside the render lock.
     if (pendingAction != PendingAction::ReplaceForSleep &&
@@ -312,14 +314,7 @@ void ActivityManager::goToLibrary() {
   replaceActivity(std::move(activity));
 }
 
-void ActivityManager::goToArticles() {
-  auto activity = makeUniqueNoThrow<ArticlesActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: articles activity");
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToArticles() { goToLibrary(); }
 
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
@@ -372,26 +367,9 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
   replaceActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, std::move(message), style));
 }
 
-void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
-  if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
-    const auto& activityName = currentActivity->name;
-    if (activityName == "FileBrowser") {
-      initialMenuItem = HomeMenuItem::FILE_BROWSER;
-    } else if (activityName == "Library") {
-      initialMenuItem = HomeMenuItem::LIBRARY;
-    } else if (activityName == "Articles") {
-      initialMenuItem = HomeMenuItem::ARTICLES;
-    } else if (activityName == "PluginCatalog") {
-      initialMenuItem = HomeMenuItem::PLUGINS;
-    } else if (activityName == "OpdsBookBrowser") {
-      initialMenuItem = HomeMenuItem::OPDS_BROWSER;
-    } else if (activityName == "CrossPointWebServer") {
-      initialMenuItem = HomeMenuItem::FILE_TRANSFER;
-    } else if (activityName == "Settings" || activityName == "SettingsList") {
-      initialMenuItem = HomeMenuItem::SETTINGS_MENU;
-    }
-  }
-  replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem, cleanInitialRefresh));
+void ActivityManager::goHome(HomeMenuItem, const bool cleanInitialRefresh) {
+  if (cleanInitialRefresh) renderer.promoteNextRefresh(HalDisplay::HALF_REFRESH);
+  goToLibrary();
 }
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 
@@ -448,6 +426,11 @@ bool ActivityManager::isForegroundHomeShown() const {
 
 bool ActivityManager::isForegroundArticles() const {
   return pendingAction == PendingAction::None && currentActivity && currentActivity->name == "Articles";
+}
+
+bool ActivityManager::isForegroundLibrary() const {
+  return pendingAction == PendingAction::None && currentActivity && currentActivity->name == "Library" &&
+         paintedVisit.load(std::memory_order_acquire) == screenVisit;
 }
 
 bool ActivityManager::remoteShortcut(const bool readerMenu) {

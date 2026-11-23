@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 namespace phonesync::store {
 namespace {
@@ -122,6 +123,58 @@ bool contains(const char* idHex) {
       },
       &ctx);
   return ctx.found;
+}
+
+bool lookup(const char* idHex, Entry& out) {
+  struct Context {
+    const char* id;
+    Entry* entry;
+    bool found;
+  } context{idHex, &out, false};
+  out.id[0] = 0;
+  out.time = 0;
+  out.read = false;
+  out.source.clear();
+  out.title.clear();
+  out.author.clear();
+  const bool ok = forEach(
+      [](void* raw, const char* id, uint32_t time, const char* source, const char* title, const char* author) {
+        auto& ctx = *static_cast<Context*>(raw);
+        if (strcmp(ctx.id, id) != 0) return true;
+        memcpy(ctx.entry->id, id, kIdHexLen + 1);
+        ctx.entry->time = time;
+        ctx.entry->source = source;
+        ctx.entry->title = title;
+        ctx.entry->author = author;
+        ctx.found = true;
+        return false;
+      },
+      &context);
+  return ok && context.found;
+}
+
+void formatSubtitle(const Entry& entry, std::string& result) {
+  result.clear();
+  result.reserve(entry.author.size() + entry.source.size() + 20);
+  auto add = [&](const char* text) {
+    if (!text || !*text) return;
+    if (!result.empty()) result += " · ";
+    result += text;
+  };
+  add(entry.author.c_str());
+  add(entry.source.c_str());
+}
+
+void formatDate(uint32_t timestamp, std::string& result) {
+  result.clear();
+  if (timestamp == 0) return;
+  const time_t stamp = timestamp;
+  tm date{};
+  if (gmtime_r(&stamp, &date)) {
+    char formatted[16];
+    snprintf(formatted, sizeof(formatted), "%04d-%02d-%02d", date.tm_year + 1900, date.tm_mon + 1, date.tm_mday);
+    result = formatted;
+  }
 }
 
 bool append(const char* idHex, const uint32_t time, const char* source, const size_t sourceLen, const char* title,

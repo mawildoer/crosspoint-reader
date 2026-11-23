@@ -46,4 +46,7 @@ CRC-32 is the zlib polynomial over the whole file. An interrupted transfer may l
 file and attempt to remove any newly renamed EPUB if indexing fails; SD faults can prevent cleanup.
 
 A sync session: HELLO → LIST → for each article the device lacks: PUT_BEGIN / PUT_DATA… / PUT_END
-→ DELETE for articles the phone has retired → BYE. After BYE the device turns the radio off on Home; on Articles it keeps an existing connection for further sessions.
+→ DELETE for articles the phone has retired → BYE. After BYE the Library (the Paperboy Home screen)
+keeps an existing connection for further sessions. After a quiet interval, the Library briefly stops
+the radio to reconcile its index, then resumes sync. Opening a book, another screen, or Wi-Fi also
+stops the radio to release its memory.

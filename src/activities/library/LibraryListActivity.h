@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ArticleStore.h>
 #include <LibraryIndexFile.h>
 
 #include <cstdint>
@@ -7,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "LibraryRefresh.h"
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
@@ -35,6 +37,7 @@ class LibraryListActivity final : public UiTabListActivity {
 
   void onEnter() override;
   void onExit() override;
+  bool isHomeActivity() const override { return true; }
 
  protected:
   // --- UiListActivity / UiTabListActivity contract ---------------------------
@@ -74,6 +77,7 @@ class LibraryListActivity final : public UiTabListActivity {
   bool rebuildIndex();
 
   // Input
+  bool pathForEntry(int entry, std::string& path);
   void openSelectedBook();
   void openSearch();
   // Shared tail of row activation and the options menu's Open entry.
@@ -99,6 +103,7 @@ class LibraryListActivity final : public UiTabListActivity {
   void swallowHeldReleases();
   // Staged back-out shared by Button::Back and the header back arrow.
   void handleBackAction();
+  void showLibraryMenu();
   static void searchActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
   static void rebuildActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
   static void backActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
@@ -107,8 +112,7 @@ class LibraryListActivity final : public UiTabListActivity {
   void applyFilter();
   int bookRowCount() const;
   int rowFor(int entry) const;
-  // fileName, when asked for, is the on-card name the row's icon derives from
-  // (the display title may come from metadata and carry no extension).
+  // fileName is the basename, prefixed with /Articles/ only for article rows.
   bool rowTextFor(int entry, std::string& title, std::string& author, std::string* fileName = nullptr);
   uint32_t titleInitialFor(int entry);
   bool buildGroupStarts();
@@ -177,6 +181,11 @@ class LibraryListActivity final : public UiTabListActivity {
   std::vector<freeink::ui::ListItem> winItems;
   std::vector<std::string> winTitles;
   std::vector<std::string> winAuthors;
+  std::vector<std::string> winDetails;
+  std::vector<std::string> winDates;
+  std::vector<phonesync::store::Entry> winArticleMetadata;
+  LibraryRefresh articleRefresh;
+  uint16_t articleFolder = 0xFFFF;
   std::vector<std::string> winHeaders;
 
   // Pinned overlay state: per store entry its RecentAsc row (0xFFFF when the

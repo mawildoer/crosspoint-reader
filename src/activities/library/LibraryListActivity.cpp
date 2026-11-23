@@ -1,5 +1,6 @@
 #include "LibraryListActivity.h"
 
+#include <ArticleStore.h>
 #include <BoardConfig.h>
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
@@ -9,6 +10,7 @@
 #include <LibraryText.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <PhoneSync.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -112,6 +114,8 @@ void LibraryListActivity::onEnter() {
     LOG_ERR("LIB", "index was built without duplicate detection");
   }
   resolvePinned();
+  articleFolder = index.findFolderId("/Articles");
+  articleRefresh.reset(phonesync::storeGeneration());
 
   // Entered while Confirm was still held (typical when launched from the home
   // menu): ignore its release, or we would open whatever sits at row 0.
@@ -198,24 +202,24 @@ void LibraryListActivity::refreshOverlap() {
   std::sort(overlapRows, overlapRows + overlapCount);
 }
 
+bool LibraryListActivity::pathForEntry(const int entry, std::string& path) {
+  path.clear();
+  if (entry < 0 || entry >= bookRowCount()) return false;
+  if (entry < pinnedCount()) {
+    const auto& books = RECENT_BOOKS.getBooks();
+    if (entry >= static_cast<int>(books.size())) return false;
+    path = books[static_cast<size_t>(entry)].path;
+    return true;
+  }
+  if (!index.isOpen()) return false;
+  const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
+  library::ClixRecord record{};
+  return ordinal != 0xFFFF && index.readRecord(ordinal, record) && index.readPath(record, path);
+}
+
 void LibraryListActivity::openSelectedBook() {
   std::string path;
-  if (selectedEntry() < pinnedCount()) {
-    const auto& books = RECENT_BOOKS.getBooks();
-    if (selectedEntry() >= static_cast<int>(books.size())) return;
-    path = books[static_cast<size_t>(selectedEntry())].path;
-  } else {
-    if (!index.isOpen()) return;
-    const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(selectedEntry())));
-    if (ordinal == 0xFFFF) return;
-
-    library::ClixRecord record{};
-    if (!index.readRecord(ordinal, record) || !index.readPath(record, path)) {
-      LOG_ERR("LIB", "cannot resolve path for row %d", selectedEntry());
-      return;
-    }
-  }
-  openBookByPath(path);
+  if (pathForEntry(selectedEntry(), path)) openBookByPath(path);
 }
 
 // Shared by row activation and the options menu: the reader screen this opens
@@ -329,16 +333,52 @@ void LibraryListActivity::swipeDelete(const int entry) {
 // wants the card to itself, and the render task must not read the index (or
 // the filter) around it.
 void LibraryListActivity::promptRebuildIndex() {
+  phonesync::stop(2000);
   RenderLock lock(*this);
+  std::string selectedPath;
+  if (!tabsFocused() && selectedEntry() < listCount()) {
+    pathForEntry(groupsCollapsed ? groupStarts[selectedEntry()] : selectedEntry(), selectedPath);
+  }
+  const int viewportOffset = std::max(0, selectedEntry() - activeNav().top);
+  closeRouting();
+  app.clearTapFlash();
+#if FREEINK_CAP_TOUCH
+  closeSwipeDelete();
+#endif
   GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
   index.close();
+  if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
   rebuildIndex();
   if (!index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot open library index");
   resetAfterRebuild();
+  articleRefresh.reset(phonesync::storeGeneration());
+  // Insertions must not move the user's selection to a different document.
+  activeNav().selected = 0;
+  if (!selectedPath.empty()) {
+    const uint64_t selectedHash = library::clixPathHash(selectedPath.data(), selectedPath.size());
+    for (int entry = 0; entry < bookRowCount(); ++entry) {
+      if (entry >= pinnedCount()) {
+        library::ClixRecord record{};
+        uint64_t hash = 0;
+        const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
+        if (ordinal == 0xFFFF || !index.readRecord(ordinal, record) || !index.readPathHash(record, hash) ||
+            hash != selectedHash)
+          continue;
+      }
+      std::string path;
+      if (pathForEntry(entry, path) && path == selectedPath) {
+        activeNav().selected = entry + 1;
+        activeNav().top = std::max(0, entry - viewportOffset);
+        break;
+      }
+    }
+  }
+  swallowHeldReleases();
   requestUpdate(true);
 }
 
 void LibraryListActivity::resetAfterRebuild() {
+  articleFolder = index.findFolderId("/Articles");
   // Sort positions, group starts, and pinned rows all point into the old order.
   applyFilter();
   resolvePinned();
@@ -686,8 +726,27 @@ void LibraryListActivity::handleBackAction() {
     nav.selected = 0;
     requestUpdate();
   } else {
-    onGoHome();
+    showLibraryMenu();
   }
+}
+
+void LibraryListActivity::showLibraryMenu() {
+  const StrId items[] = {StrId::STR_SETTINGS_TITLE,  StrId::STR_BROWSE_FILES,        StrId::STR_FILE_TRANSFER,
+                         StrId::STR_LIBRARY_REBUILD, StrId::STR_PAPERBOY_PAIR_PHONE, StrId::STR_CANCEL};
+  optionPopup.show(StrId::STR_PAPERBOY_MENU, items, 6, 0, [this](int choice) {
+    swallowHeldReleases();
+    if (choice == 0)
+      activityManager.goToSettings();
+    else if (choice == 1)
+      activityManager.goToFileBrowser();
+    else if (choice == 2)
+      activityManager.goToFileTransfer();
+    else if (choice == 3)
+      promptRebuildIndex();
+    else if (choice == 4)
+      phonesync::forgetPhone();
+  });
+  requestUpdate();
 }
 
 void LibraryListActivity::searchActionTrampoline(const fui::ActionEvent&, void* user) {
@@ -728,13 +787,24 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
     if (!index.readAuthor(record, author)) author.clear();
     // The stored title when the book gave one, the filename otherwise.
     if (!index.readTitle(record, title) || title.empty()) index.readName(record, title);
-    if (fileName) index.readName(record, *fileName);
+    if (fileName && index.readName(record, *fileName) && record.folderId == articleFolder) {
+      fileName->insert(0, "/Articles/");
+    }
   }
   if (title.empty()) title = tr(STR_LIBRARY_UNKNOWN_TITLE);
   return true;
 }
 
 bool LibraryListActivity::handleCustomInput() {
+  const uint32_t now = millis();
+  articleRefresh.observe(phonesync::storeGeneration(), now);
+  int touchX = 0;
+  int touchY = 0;
+  const bool touchActive = mappedInput.isScreenTouchHeld(touchX, touchY) || mappedInput.wasScreenTouchReleased();
+  if (articleRefresh.due(now) && !phonesync::status().receiving && !optionPopup.isActive() && !touchActive) {
+    promptRebuildIndex();
+    return true;
+  }
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
 
   if (lockNextConfirmRelease && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -750,6 +820,10 @@ bool LibraryListActivity::handleCustomInput() {
 }
 
 bool LibraryListActivity::handleButtons() {
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Back, LONG_PRESS_MS)) {
+    showLibraryMenu();
+    return true;
+  }
   const int count = listCount();
 
   // Every hold action fires at the threshold, mid-hold, including the ones
@@ -840,6 +914,9 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   props.inputMask = fui::InputTouch | fui::InputLongPress;
   props.labelText = screen.theme().bodyText;
   props.labelText.maxLines = 1;
+  props.subtitleText = screen.theme().smallText;
+  props.subtitleText.maxLines = 2;
+  props.valueText = screen.theme().smallText;
   // Breathing room between rows; the dense theme default packs the two-line
   // rows edge-to-edge.
   props.rowGap = std::max<int16_t>(screen.theme().listRowGap, 6);
@@ -850,6 +927,9 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   const size_t cap = static_cast<size_t>(nav.visibleRows > 0 ? nav.visibleRows : 1) + 1;
   if (winTitles.size() < cap) winTitles.resize(cap);
   if (winAuthors.size() < cap) winAuthors.resize(cap);
+  if (winDetails.size() < cap) winDetails.resize(cap);
+  if (winDates.size() < cap) winDates.resize(cap);
+  if (winArticleMetadata.size() < cap) winArticleMetadata.resize(cap);
   if (!groupsCollapsed && winHeaders.size() < cap) winHeaders.resize(cap);
   winItems.clear();
   if (winItems.capacity() < cap) winItems.reserve(cap);
@@ -865,6 +945,7 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
     std::string& title = winTitles[static_cast<size_t>(rows)];
     std::string& author = winAuthors[static_cast<size_t>(rows)];
     fui::ListItem item;
+    bool isArticle = false;
     if (groupsCollapsed) {
       const int bookEntry = groupStarts[entry];
       if (authorGrouped) {
@@ -892,12 +973,32 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
           formatInitialHeading(initial, heading);
         item.sectionHeading = heading.c_str();
       }
-      if (!authorGrouped && !author.empty()) item.subtitle = author.c_str();
+      std::string& detail = winDetails[static_cast<size_t>(rows)];
+      detail.clear();
+      char articleId[phonesync::store::kIdHexLen + 1];
+      isArticle = phonesync::store::idOfPath(rowFile.c_str(), articleId);
+      if (isArticle) {
+        auto& metadata = winArticleMetadata[static_cast<size_t>(rows)];
+        if (phonesync::store::lookup(articleId, metadata)) {
+          if (!metadata.title.empty()) title = metadata.title;
+          phonesync::store::formatSubtitle(metadata, detail);
+          auto& date = winDates[static_cast<size_t>(rows)];
+          phonesync::store::formatDate(metadata.time, date);
+          if (!date.empty()) item.value = date.c_str();
+        } else {
+          detail = author;
+        }
+      } else if (!authorGrouped) {
+        detail = author;
+      }
+      if (!detail.empty()) item.subtitle = detail.c_str();
     }
 
     item.label = title.c_str();
     // Group headings stay bare; every book row gets its file-type icon.
-    if (!groupsCollapsed && !rowFile.empty()) item.icon = listIconFor(UITheme::getFileIcon(rowFile), 32);
+    if (!groupsCollapsed && !rowFile.empty()) {
+      item.icon = isArticle ? fui::bitmapFromIcon(icon_file_text_32) : listIconFor(UITheme::getFileIcon(rowFile), 32);
+    }
     item.actionValue = static_cast<int16_t>(entry);
     winItems.push_back(item);
     rows++;
@@ -961,7 +1062,8 @@ void LibraryListActivity::buildHeader(UiScreen& screen) {
   // heights are unified across themes, so the buttons derive from the band.
   GUI.applyHeaderStatus(renderer, header);
   if (mappedInput.hasTouch()) {
-    header.leadingIcon = fui::bitmapFromIcon(icon_header_back_32);
+    const bool atRoot = tabsFocused() && !groupsCollapsed && query.empty();
+    header.leadingIcon = fui::bitmapFromIcon(atRoot ? icon_settings_32 : icon_header_back_32);
     header.leadingAction = ACTION_BACK;
   }
   if (!degraded) {
@@ -1074,7 +1176,7 @@ void LibraryListActivity::drawFooter() {
   drawHoldHelp();
 
   const bool backGoesHome = tabsFocused() && !groupsCollapsed && query.empty();
-  const char* backLabel = backGoesHome ? tr(STR_HOME) : tr(STR_BACK);
+  const char* backLabel = backGoesHome ? tr(STR_PAPERBOY_MENU) : tr(STR_BACK);
   const char* confirmLabel = groupsCollapsed ? tr(STR_SELECT) : tr(STR_OPEN);
   const bool canSearch = tabsFocused() && !degraded;
   const auto labels = mappedInput.mapLabels(backLabel, tabsFocused() ? tr(STR_TOGGLE) : confirmLabel,

@@ -17,8 +17,8 @@ struct Host {
   const char* firmwareVersion;
 };
 
-// What is in front. The radio runs on Home and Articles only: the reader needs the heap.
-enum class Where : uint8_t { Home, Articles, Reader, Elsewhere };
+// The radio runs on reading lists, not in the reader, which needs the heap.
+enum class Where : uint8_t { Home, Articles, Library, Reader, Elsewhere };
 
 struct Status {
   bool compiledIn;

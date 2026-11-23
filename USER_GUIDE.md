@@ -87,6 +87,12 @@ If the frontlight doesn't come back on after the device wakes from sleep, check 
 
 ---
 
+## Paperboy reading Home
+
+This fork opens the Library for Home. Articles and books are mixed in the same Recent/Title/Author lists. Articles use a lined-paper icon with their author, source and publication date; books retain their existing rows. New article deliveries and deletions refresh the library after the sync settles.
+
+Press Back from the Library tab strip (after clearing any search/group state), or hold Back from a list, to open Menu. Settings, file browsing, transfers, index refresh and phone pairing live there. Touch devices use the leading header control. Reader resume stays unchanged.
+
 ## 2. Power & Startup
 
 In this Paperboy build, X3 stays awake while USB power is detected. Connecting power that cold-boots the device opens the reader instead of returning to sleep. Automatic sleep resumes with a full inactivity timeout after unplugging. The power button can still put it to sleep manually. At full charge, USB detection requires an active computer connection; a wall charger, power bank, or sleeping computer may not be detected. Wake on insertion from deep sleep still requires hardware verification.
@@ -111,7 +117,9 @@ Upon turning the device on for the first time, you will be placed on the **[Home
 
 ### 3.1 Home Screen
 
-The Home screen is the main entry point to the firmware. From here you can navigate to **[Reading Mode](#4-reading-mode)** with the most recently read book, **[Browse Files](#33-browse-files-screen)**, the **[Library](#34-library-screen)**, **[File Transfer](#35-file-transfer-screen)**, or **[Settings](#36-settings)**.
+In Paperboy, Home opens the **[Library](#34-library-screen)**. Books and synced articles share one list. Articles use a lined-paper icon and show author, source, and publication date when available. Open any row to read or resume it.
+
+Press **Back** at the tab strip, or hold **Back** from within the list, to open **Menu**. It provides **[Settings](#36-settings)**, **[Browse Files](#33-browse-files-screen)**, **[File Transfer](#35-file-transfer-screen)**, **Refresh Library**, and **Pair a New Phone**. Touch devices also have a menu button in the header.
 
 ### 3.2 Reading Mode
 
@@ -128,10 +136,9 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card and shows their titles and authors without requiring you to remember their folders. Its four tabs provide different views. An arrow beside an indexed tab shows the sort direction:
+The Library indexes up to 4,096 supported books and articles on the SD card without requiring you to remember their folders. Its three tabs provide different views. An arrow beside a tab shows the sort direction:
 
-- **Recent** lists the ten books you opened most recently. Hold a book to remove it from this list.
-- **Added** keeps books in the order in which the Library first discovered them. Down shows newest additions first; up shows oldest first.
+- **Recent** mixes books and articles by arrival time, with your ten most recently opened reads pinned at the top. Down shows newest arrivals first; up shows oldest first without pins. Hold a row to open its options, including removing a pinned item from recents without deleting it.
 - **Title** groups books by the first letter of the title. Up sorts A-Z and down sorts Z-A. Titles beginning with numbers or punctuation appear under `#`; letters from non-English scripts, including Hebrew, have their own groups.
 - **Author** groups books by author. Up sorts A-Z and down sorts Z-A.
 
@@ -139,17 +146,16 @@ On a button-only device:
 
 - Use **Up/Down** or **Left/Right** to move one row at a time. Hold a direction to move a page at a time.
 - Press **Confirm** to open the selected book.
-- Press **Back** from the book list to focus the tabs. Use **Left/Right** to select another tab, press **Confirm** to reverse its sort direction, or press **Down** to return to the list.
-- While the tabs are focused, hold **Confirm** to open Search.
+- Press **Back** from the list to focus the tabs. Press **Confirm** to move to the next tab, or hold **Confirm** to reverse its sort direction. Press **Next** to return to the list; press **Previous** from the tabs to open Search. Holding **Next/Previous** moves between tabs.
 - In the Title or Author views, hold **Confirm** on a book to collapse the list to its letter or author groups. The matching group remains selected. Press **Confirm** to enter a group, or **Back** to restore the exact book and position you came from.
 
-On a touch device, tap tabs, books, and the Search icon directly. Tap an active indexed tab again to reverse its sort direction. Swipe to scroll. Long-press a book in the Recent view to remove it from the list. Long-press a book in a Title or Author view to collapse to the group list, then tap a group to expand it. The **Added** view is not grouped; tapping or long-pressing a book opens it.
+On a touch device, tap tabs, rows, and the Search icon directly. Tap the active tab again to reverse its sort direction. Swipe to scroll. Long-press a row in Recent to open its options. Long-press a row in Title or Author to collapse to the group list, then tap a group to expand it.
 
-The index is created automatically the first time the Library is opened. To pick up later file changes or updated metadata, use **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
+The index is created automatically the first time the Library is opened. Phone sync refreshes it after adding or deleting articles. For other file changes or updated metadata, use **Menu → Refresh Library** or **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
 
 ### 3.5 File Transfer Screen
 
-The File Transfer screen allows you to upload and manage files on the device. When you enter the screen, choose **Join a Network**, **Calibre Wireless**, or **Create Hotspot**. The reader then starts the web server for the selected mode. The screen also lists **OPDS Browser**, which opens your OPDS catalogs; with no server configured it opens the server list so you can add one (see [OPDS Servers](#365-opds-servers-multiple-libraries)). In this Paperboy build, OPDS Browser remains under **Home → File Transfer → OPDS Browser**, and enabled Plugins are listed there too.
+The File Transfer screen allows you to upload and manage files on the device. When you enter the screen, choose **Join a Network**, **Calibre Wireless**, or **Create Hotspot**. The reader then starts the web server for the selected mode. The screen also lists **OPDS Browser**, which opens your OPDS catalogs; with no server configured it opens the server list so you can add one (see [OPDS Servers](#365-opds-servers-multiple-libraries)). In this Paperboy build, OPDS Browser remains under **Menu → File Transfer → OPDS Browser**, and enabled Plugins are listed there too.
 
 See the [web server docs](./docs/webserver.md) for more information on how to connect to the web server and upload files.
 
@@ -369,11 +375,11 @@ Side buttons, and Taps and gestures where supported by the device. See the
 
 - **Plugins** (**Settings → Connectivity**): Enable or disable SD-card plugins. Clean installs start disabled; upgrades with existing plugins are kept enabled automatically. Disabling plugins leaves all plugin files on the SD card but stops plugin discovery and execution until they are enabled again.
   - Enabling plugins immediately adds **Plugins** to File Transfer, even when no plugins are installed yet. Sideloaded SD-card plugins work without Plugin Hub.
-  - Open **Home → File Transfer → Plugins** to view installed plugins. Hold **Confirm** on a selected installed plugin for one second (or long-press its row on a touch device) to open an uninstall confirmation. Confirming deletes that plugin's installed folder and files; cancelling leaves it installed. If no usable on-device Plugin Hub is available and its installer has not been hidden, a **Plugin Hub — Download, discover, and update plugins** entry is also shown. A manually sideloaded Hub with a valid `device.json` is recognized without requiring the optional README or browser files.
+  - Open **Menu → File Transfer → Plugins** to view installed plugins. Hold **Confirm** on a selected installed plugin for one second (or long-press its row on a touch device) to open an uninstall confirmation. Confirming deletes that plugin's installed folder and files; cancelling leaves it installed. If no usable on-device Plugin Hub is available and its installer has not been hidden, a **Plugin Hub — Download, discover, and update plugins** entry is also shown. A manually sideloaded Hub with a valid `device.json` is recognized without requiring the optional README or browser files.
   - Selecting that Plugin Hub entry offers **Install**, **Hide**, or **Cancel**. **Install** downloads Plugin Hub over Wi-Fi. If you back out of Wi-Fi selection, installation is cancelled, Wi-Fi is turned back off, and you return to Plugins with the installer still available. **Hide** removes only the Plugin Hub install entry; it does not disable plugins or affect sideloaded plugins. **Cancel** leaves the entry unchanged.
   - **Hide** persists across reboots. Setting **Settings → Connectivity → Plugins** to **Enabled** again brings the installer back.
   - Plugins with web settings appear on the **Plugins** page of the web UI while **File Transfer** is running. Its link is hidden while plugins are disabled.
-  - Plugin Hub is optional. Users who prefer manual installation can download it directly from [crosspoint-plugin-hub releases](https://github.com/crosspoint-reader/crosspoint-plugin-hub/releases) and copy/extract the `pluginhub` folder so it ends up at `/.crosspoint/plugins/pluginhub/`, `/plugins/pluginhub/`, or `/.plugins/pluginhub/`. Once installed, Plugin Hub appears as a normal entry under **Home → File Transfer → Plugins**.
+  - Plugin Hub is optional. Users who prefer manual installation can download it directly from [crosspoint-plugin-hub releases](https://github.com/crosspoint-reader/crosspoint-plugin-hub/releases) and copy/extract the `pluginhub` folder so it ends up at `/.crosspoint/plugins/pluginhub/`, `/plugins/pluginhub/`, or `/.plugins/pluginhub/`. Once installed, Plugin Hub appears as a normal entry under **Menu → File Transfer → Plugins**.
 
 - **Language**: Set the UI language. CrossPoint supports 32 languages: English, Spanish, French, German, Czech, Brazilian Portuguese, European Portuguese, Russian, Swedish, Romanian, Catalan, Ukrainian, Belarusian, Italian, Polish, Finnish, Danish, Dutch, Turkish, Kazakh, Hungarian, Lithuanian, Slovenian, Valencian, Hebrew, Arabic, Slovak, Bosnian, Vietnamese, Norwegian Bokmål, Indonesian, and Orangutan.
 
@@ -381,7 +387,7 @@ Side buttons, and Taps and gestures where supported by the device. See the
 
 #### 3.6.5 OPDS Servers (Multiple Libraries)
 
-CrossPoint supports saving multiple OPDS servers and switching between them when browsing catalogs. Browse them from **Home → File Transfer → OPDS Browser**.
+CrossPoint supports saving multiple OPDS servers and switching between them when browsing catalogs. Browse them from **Menu → File Transfer → OPDS Browser**.
 
 1. Open **Settings -> Connectivity -> OPDS Servers**.
 

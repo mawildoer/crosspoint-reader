@@ -231,6 +231,25 @@ bool LibraryIndexFile::readSourceAuthor(const ClixRecord& record, std::string& o
   return readBlobField(record, 2, out);
 }
 
+uint16_t LibraryIndexFile::findFolderId(const char* path) {
+  if (!opened || !path) return 0xFFFF;
+  const size_t length = std::strlen(path);
+  if (length == 0 || length > UINT8_MAX) return 0xFFFF;
+  uint32_t offset = head.folderStart;
+  const uint32_t end = head.folderStart + head.folderLen;
+  char folder[UINT8_MAX];
+  for (uint16_t id = 0; id < head.folderCount; ++id) {
+    uint8_t pathLen = 0;
+    if (offset >= end || !readAt(offset, &pathLen, 1) || pathLen == 0 || pathLen > end - offset - 1u) return 0xFFFF;
+    if (pathLen == length) {
+      if (!readAt(offset + 1, folder, pathLen)) return 0xFFFF;
+      if (std::memcmp(folder, path, length) == 0) return id;
+    }
+    offset += 1u + pathLen;
+  }
+  return 0xFFFF;
+}
+
 bool LibraryIndexFile::readPath(const ClixRecord& record, std::string& out) {
   out.clear();
   if (!opened || record.folderId >= head.folderCount) return false;

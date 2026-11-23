@@ -5,7 +5,7 @@ ROOT="$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT HUP INT TERM
 "${CXX:-c++}" -std=c++20 -I"$ROOT/test/paperboy_host/stubs" \
-  -I"$ROOT/lib/PhoneSync/include" -I"$ROOT/lib/PhoneSync/src" \
+  -I"$ROOT/lib/PhoneSync/include" -I"$ROOT/lib/PhoneSync/src" -I"$ROOT/src/activities/library" \
   "$ROOT/test/paperboy_host/store_check.cpp" "$ROOT/lib/PhoneSync/src/ArticleStore.cpp" \
   -o "$BUILD_DIR/store_check"
 "$BUILD_DIR/store_check"

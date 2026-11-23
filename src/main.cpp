@@ -879,11 +879,18 @@ void loop() {
   scene.storageBusy = activityManager.requiresExclusiveStorageLoop();
   scene.wifiOn = WiFi.getMode() != WIFI_MODE_NULL;
   const bool remoteActed = bleturner::tick(scene);
-  phonesync::tick(activityManager.isForegroundArticles() ? phonesync::Where::Articles
-                  : homeShown                            ? phonesync::Where::Home
-                  : activityManager.isReaderActivity()   ? phonesync::Where::Reader
-                                                         : phonesync::Where::Elsewhere,
-                  scene.storageBusy, scene.wifiOn);
+  {
+    // Article writes and library metadata reads must not overlap a repaint.
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) {
+      phonesync::tick(activityManager.isForegroundLibrary()    ? phonesync::Where::Library
+                      : activityManager.isForegroundArticles() ? phonesync::Where::Articles
+                      : homeShown                              ? phonesync::Where::Home
+                      : activityManager.isReaderActivity()     ? phonesync::Where::Reader
+                                                               : phonesync::Where::Elsewhere,
+                      scene.storageBusy, scene.wifiOn);
+    }
+  }
 
   if (activityManager.requiresExclusiveStorageLoop()) {
     // USB Drive handed the raw SD card to the host. Do not run screenshots,

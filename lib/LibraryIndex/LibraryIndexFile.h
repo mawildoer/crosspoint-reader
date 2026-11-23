@@ -91,6 +91,9 @@ class LibraryIndexFile {
 
   // Absolute path of the book, rebuilt from its folder record.
   bool readPath(const ClixRecord& record, std::string& out);
+  // One folder-table pass per index open; callers retain the id while paging.
+  // 0xFFFF means absent or unreadable.
+  uint16_t findFolderId(const char* path);
 
  private:
   bool openImpl(const char* path, bool acceptStaleFold);
