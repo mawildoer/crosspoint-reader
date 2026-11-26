@@ -63,7 +63,7 @@ and firmware install OK. The phone recorded:
     22:27:52 HELLO_ACK v1 ... fw="0.2.0-paperboy"
     22:27:52 Sync: up to date
 
-Active-BLE free heap remained above 73 KiB, largest block 69,620 bytes. These are
+Active-BLE free heap remained above 73,000 bytes, largest block 69,620 bytes. These are
 serial/protocol observations, not a claim that all human hardware QA was done.
 Full local logs are `/tmp/paperboy-bluetooth-update.log` and
 `/tmp/paperboy-phone-bluetooth-update.log`; they are not committed.
