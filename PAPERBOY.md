@@ -77,12 +77,23 @@ correctness, architecture, embedded resources, and i18n/docs, with one follow-up
 round. Recovery, shared move ownership, and directory layout findings were fixed
 and reviewed; the final stale documentation phrase was corrected. No verified
 finding remains. The logo is generated from the companion app's Paperboy artwork.
-Final `default` and `gh_release` builds passed with version `0.3.0-paperboy`;
+Final `default` and `gh_release` builds passed. The release version is `0.3.0-paperboy`;
 formatting, diff whitespace checks, and workflow validation passed. The existing
 NimBLE service-start deprecation warning remains. The SDK stays pinned at
 `3f3e4c1`. The requested behavior and fork ownership follow the human's three-view,
 Bump, and branding requirements; the requested delivery route is TestFlight then
 Bluetooth, with no upstream PR.
+
+Both branch CI and [release CI](https://github.com/mawildoer/crosspoint-reader/actions/runs/45911582421)
+passed for `77d25af`. The latest-release API selects `paperboy-v0.3.0`. Downloaded
+assets matched `SHA256SUMS`; esptool verified the ESP32-C3 image checksum and
+validation hash. The 5,532,640-byte update fits the 0x640000-byte OTA slot and
+contains the configured runtime version `0.3.0-paperboy` and new touch-store/UI
+markers. Binary SHA-256:
+`2891b36182953390c7ece07dac71da378874a1fb179ed233476419fe89c9d014`.
+The embedded ESP-IDF descriptor reports older build metadata
+(`f021681`); the runtime HELLO/About version comes from `CROSSPOINT_VERSION`,
+not that descriptor. CI compiled the changed firmware sources for this release.
 
 Install through TestFlight and then the app's Bluetooth firmware updater. On the
 X3, check that the app reconnects and reports `0.3.0-paperboy`; interrupted
