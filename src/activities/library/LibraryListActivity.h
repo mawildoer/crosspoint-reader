@@ -13,10 +13,8 @@
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
 
-// One Library screen: every indexed book on the card shown by recency, title,
-// or author. The Recent shelf orders by file modification time (when a book
-// landed on the card) and pins the recently OPENED books from RecentBooksStore
-// on top, so active reads and fresh arrivals share one list.
+// One Library screen: books and articles ordered by added time, publication
+// time, title, or author. Reading a row never changes either timestamp order.
 //
 // The two-slot row is the whole point rather than a styling choice: the problem
 // being solved is "I cannot find my books because I do not know the authors",
@@ -84,11 +82,10 @@ class LibraryListActivity final : public UiTabListActivity {
   void openBookByPath(const std::string& path);
   void promptRebuildIndex();
   void resetAfterRebuild();
-  // Recent-row long-press menu: open / remove from recents / delete / rebuild.
-  void showRecentBookOptions(int entry);
-  void promptRemoveRecentBook(const std::string& path, const std::string& title);
+  // Date-row long-press menu: open / delete / rebuild.
+  void showDateBookOptions(int entry);
   // Long-press delete owns the gesture where grouping does not apply: the
-  // Recent sort, degraded lists, and any active search result.
+  // date sorts, degraded lists, and any active search result.
   bool deleteEligible() const;
   // Resolves the row's path and title, then confirms via promptDeleteBookByPath.
   void promptDeleteBook(int entry);
@@ -134,22 +131,11 @@ class LibraryListActivity final : public UiTabListActivity {
   int selectedEntry() const;
   bool tabsFocused() const { return ringPos() == 0; }
 
-  // --- pinned recently-opened overlay ---------------------------------------
-  // On the unfiltered Recent shelf the RecentBooksStore entries sit on top, in
-  // read order; the modification-time list follows with those books skipped.
-  // Entries below pinnedCount() are store rows; the rest go through rowFor().
-  int pinnedCount() const;
-  // Re-match the store against the index (chunked scan). Call whenever the
-  // index or the store changes.
-  void resolvePinned();
-  // Direction-space translation of the matched rows. Call on sort toggles.
-  void refreshOverlap();
-
   library::LibraryIndexFile index;
   int activeTabIndex = 0;
   library::SortOrder sortOrder = library::SortOrder::RecentDesc;
-  // One bit per tab; Recent starts descending (newest first).
-  uint8_t descendingTabs = 1u << 0;
+  // Timestamp sorts start newest first; text sorts start ascending.
+  uint8_t descendingTabs = (1u << 0) | (1u << 1);
   // Set when the walk finished but the sort did not, so the screen can say the
   // order is discovery order rather than silently showing a wrong one.
   bool degraded = false;
@@ -188,18 +174,10 @@ class LibraryListActivity final : public UiTabListActivity {
   uint16_t articleFolder = 0xFFFF;
   std::vector<std::string> winHeaders;
 
-  // Pinned overlay state: per store entry its RecentAsc row (0xFFFF when the
-  // book is not in the index), and the current-direction rows to skip, sorted
-  // ascending, so unpinned entries map to sort rows with a <=10-step walk.
-  uint16_t pinnedAscRows[RecentBooksStore::MAX_RECENT_BOOKS] = {};
-  uint16_t overlapRows[RecentBooksStore::MAX_RECENT_BOOKS] = {};
-  uint8_t pinnedTotal = 0;
-  uint8_t overlapCount = 0;
-
   bool lockNextConfirmRelease = false;
   bool lockNextBackRelease = false;
 
-  // Row options modal (Recent long-press menu); owned here so it outlives the
+  // Row options modal (date-row long-press menu); owned here so it outlives the
   // touch event that opened it.
   OptionPopup optionPopup;
 };

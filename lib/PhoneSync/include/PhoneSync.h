@@ -15,6 +15,9 @@ struct Host {
   // A button was pressed: ends the sync-before-sleep window early.
   bool (*buttonPressed)();
   const char* firmwareVersion;
+  bool (*canUpdateFirmware)();
+  bool (*validateFirmware)(const char* path);
+  bool (*installFirmware)(const char* path);
 };
 
 // The radio runs on reading lists, not in the reader, which needs the heap.
@@ -25,6 +28,7 @@ struct Status {
   bool radioOn;
   bool linked;
   bool receiving;
+  bool updatingFirmware;
   uint16_t receivedThisBoot;  // articles stored since boot
 };
 

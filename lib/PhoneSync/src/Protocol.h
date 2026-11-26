@@ -21,6 +21,15 @@ enum Type : uint8_t {
   PutEnd = 0x12,
   Delete = 0x20,
   Bye = 0x30,
+  FirmwareBegin = 0x40,
+  FirmwareData = 0x41,
+  FirmwareEnd = 0x42,
+  FirmwareCommit = 0x43,
+  FirmwareAbort = 0x44,
+  FirmwareReady = 0xC0,
+  FirmwareProgress = 0xC1,
+  FirmwareStaged = 0xC2,
+  FirmwareResult = 0xC3,
   HelloAck = 0x81,
   ListItems = 0x82,
   ListEnd = 0x83,
@@ -38,6 +47,8 @@ enum Result : uint8_t {
   ChecksumMismatch = 4,
   BadRequest = 5,
   Exists = 6,
+  LowBattery = 7,
+  InvalidImage = 8,
 };
 
 inline uint32_t readU32(const uint8_t* p) {

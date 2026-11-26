@@ -667,16 +667,27 @@ and is rebuilt; that is the entire migration mechanism.
 | Header | 0 | 64 bytes, `ClixHeader` |
 | Folders | `folderStart` | length-prefixed paths, one per folder |
 | Records | `recordStart` | `bookCount` × 128-byte `ClixRecord` |
-| Permutations | `permStart` | `bookCount` u16 author order, then `bookCount` u16 arrival order |
+| Permutations | `permStart` | `bookCount` u16 author order, then arrival order, then publication order when flag bit 2 is set |
 | Name blob | `nameStart` | per record: path hash, name, canonical author, title, source author (see below) |
 
-The arrival permutation runs oldest first, keyed by the record's FAT
-modification time (when the file landed on the card); `firstSeen` — the
+The arrival permutation runs oldest first, keyed by the article arrival timestamp supplied by the Library activity, or the file's FAT modification time when no arrival timestamp exists; `firstSeen` — the
 build-assigned discovery counter — breaks ties and carries books whose
 filesystem reports no time. Fold version 3 introduced the timestamp key; a
 fold bump rebuilds ranks while preserving `firstSeen`.
 Fold version 4 preserves leading articles in title sort and search keys.
 Fold version 5 drops all Unicode 18.0 Hebrew combining marks, including U+05C8 and U+05C9.
+Fold version 6 adds the publication permutation (header flag bit 2) and independent
+article arrival timestamps. Existing two-permutation indexes remain structurally
+readable for reconciliation, preserving `firstSeen`; ordinary open rebuilds the stale fold.
+The first four reserved header bytes fingerprint the configured TZ rule. A changed
+rule invalidates timestamp ranks and bypasses the unchanged-file fast path; raw
+file timestamps and reading progress remain unchanged.
+Publication order uses full Unix seconds; unknown dates sort after dated items in
+newest-first order. Equal publication timestamps use title ordinal as a stable tie.
+The index adds two SD bytes per book, with no additional resident UI array.
+The builder reuses the arrival permutation allocation and temporarily allocates
+four bytes per book for publication keys (maximum 16 KiB for 4096 records).
+Allocation failure retains the previous index.
 
 Sections are 512-byte aligned so each starts on an SD block boundary.
 

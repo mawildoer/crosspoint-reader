@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "ArticleStore.h"
+#include "FirmwareTransferState.h"
 #include "Protocol.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/message_buffer.h"
@@ -37,6 +38,11 @@ constexpr char kDeviceName[] = "Paperboy X3";
 // the SD card). Sized for the flow-control window plus the per-frame header at the smallest MTU.
 constexpr size_t kQueueBytes = 12288;
 constexpr size_t kMaxFrame = 512;
+constexpr char kFirmwarePath[] = "/.crosspoint/paperboy-firmware.bin";
+constexpr uint32_t kMaxFirmwareBytes = 0x640000;
+enum class TransferKind : uint8_t { Article, Firmware };
+FirmwareTransferState firmwareTransfer;
+std::atomic<bool> firmwareAuthorized{false};
 // The stack took about 50 KB in every X3 log of the page turner (RadioPolicy.h); the queue and
 // the reader's 32 KiB block come on top.
 constexpr size_t kStartFreeBytes = 49152 + kQueueBytes + 32768;
@@ -57,6 +63,8 @@ uint32_t lastLinkMs = 0;
 uint32_t byeAtMs = 0;
 uint32_t lastFrameMs = 0;
 uint32_t generation = 1;
+uint32_t phoneTime = 0;
+uint32_t phoneTimeAtMs = 0;
 uint16_t receivedThisBoot = 0;
 
 std::atomic<bool> linked{false};
@@ -74,6 +82,7 @@ NimBLECharacteristic* txChar = nullptr;
 // One transfer in progress.
 struct Incoming {
   bool active = false;
+  TransferKind kind = TransferKind::Article;
   HalFile file;
   char idHex[store::kIdHexLen + 1] = {};
   uint32_t size = 0;
@@ -107,7 +116,7 @@ void sendStatus(const uint8_t type, const uint8_t status) {
 }
 
 void sendProgress() {
-  uint8_t frame[5] = {PutProgress};
+  uint8_t frame[5] = {incoming.kind == TransferKind::Firmware ? FirmwareProgress : PutProgress};
   writeU32(frame + 1, incoming.received);
   send(frame, sizeof(frame));
   incoming.acked = incoming.received;
@@ -117,7 +126,8 @@ void abandonIncoming() {
   if (!incoming.active) return;
   incoming.file.close();
   incoming.active = false;
-  Storage.remove(store::kIncomingPath);
+  if (incoming.kind == TransferKind::Firmware) firmwareTransfer.clear();
+  Storage.remove(incoming.kind == TransferKind::Firmware ? kFirmwarePath : store::kIncomingPath);
 }
 
 // Counting free clusters took 5.9 s on a 16 GB card (X3, 15/11/2026), and it froze the buttons and
@@ -147,6 +157,10 @@ void measureFreeSpace() {
 }
 
 void onHello(const uint8_t* payload, const size_t len) {
+  if (len == 5) {
+    phoneTime = readU32(payload + 1);
+    phoneTimeAtMs = nowMs();
+  }
   if (len < 1 || payload[0] != kVersion) LOG_INF("SYNC", "phone speaks protocol %u", len ? payload[0] : 0);
   uint8_t frame[64] = {HelloAck, kVersion};
   frame[2] = host.batteryPercent ? host.batteryPercent() : 0;
@@ -220,6 +234,7 @@ void onPutBegin(const uint8_t* payload, const size_t len) {
     sendStatus(PutReady, StorageError);
     return;
   }
+  incoming.kind = TransferKind::Article;
   incoming.active = true;
   incoming.failed = false;
   incoming.size = fields.size;
@@ -237,9 +252,10 @@ void onPutBegin(const uint8_t* payload, const size_t len) {
 
 void onPutData(const uint8_t* payload, const size_t len) {
   if (!incoming.active) return;
+  const uint8_t resultType = incoming.kind == TransferKind::Firmware ? FirmwareStaged : PutResult;
   if (len > incoming.size - incoming.received) {
     abandonIncoming();
-    sendStatus(PutResult, BadRequest);
+    sendStatus(resultType, BadRequest);
     return;
   }
   if (!incoming.failed && incoming.file.write(payload, len) != len) incoming.failed = true;
@@ -249,7 +265,7 @@ void onPutData(const uint8_t* payload, const size_t len) {
 }
 
 void onPutEnd() {
-  if (!incoming.active) {
+  if (!incoming.active || incoming.kind != TransferKind::Article) {
     sendStatus(PutResult, BadRequest);
     return;
   }
@@ -268,7 +284,8 @@ void onPutEnd() {
       status = StorageError;
     } else if (!store::append(incoming.idHex, incoming.time, incoming.source.data(), incoming.source.size(),
                               incoming.title.data(), incoming.title.size(), incoming.author.data(),
-                              incoming.author.size())) {
+                              incoming.author.size(),
+                              phoneTime == 0 ? 0 : phoneTime + (nowMs() - phoneTimeAtMs) / 1000)) {
       Storage.remove(path.c_str());
       status = StorageError;
     }
@@ -285,6 +302,88 @@ void onPutEnd() {
             static_cast<unsigned long>(droppedFrames.load()));
   }
   sendStatus(PutResult, status);
+}
+
+void clearFirmwareStage() {
+  firmwareTransfer.clear();
+  Storage.remove(kFirmwarePath);
+}
+
+void onFirmwareBegin(const uint8_t* payload, const size_t len) {
+  if (!firmwareAuthorized.load() || !host.validateFirmware || !host.installFirmware || len != 8) {
+    sendStatus(FirmwareReady, BadRequest);
+    return;
+  }
+  if (incoming.active || firmwareTransfer.committed()) {
+    sendStatus(FirmwareReady, Busy);
+    return;
+  }
+  if (!host.canUpdateFirmware || !host.canUpdateFirmware()) {
+    sendStatus(FirmwareReady, LowBattery);
+    return;
+  }
+  const uint32_t size = readU32(payload);
+  if (size < 256 || size > kMaxFirmwareBytes) {
+    sendStatus(FirmwareReady, BadRequest);
+    return;
+  }
+  clearFirmwareStage();
+  incoming.file = Storage.open(kFirmwarePath, O_WRONLY | O_CREAT | O_TRUNC);
+  if (!incoming.file) {
+    sendStatus(FirmwareReady, StorageError);
+    return;
+  }
+  incoming.kind = TransferKind::Firmware;
+  firmwareTransfer.begin();
+  incoming.active = true;
+  incoming.failed = false;
+  incoming.size = size;
+  incoming.expectedCrc = readU32(payload + 4);
+  incoming.crc = incoming.received = incoming.acked = 0;
+  byeAtMs = 0;
+  LOG_INF("SYNC", "firmware receiving %lu bytes", static_cast<unsigned long>(size));
+  sendStatus(FirmwareReady, Ok);
+}
+
+void onFirmwareEnd() {
+  if (!incoming.active || incoming.kind != TransferKind::Firmware || !firmwareAuthorized.load()) {
+    sendStatus(FirmwareStaged, BadRequest);
+    return;
+  }
+  incoming.file.close();
+  incoming.active = false;
+  uint8_t result = Ok;
+  if (incoming.failed)
+    result = StorageError;
+  else if (incoming.received != incoming.size || incoming.crc != incoming.expectedCrc)
+    result = ChecksumMismatch;
+  else if (!host.validateFirmware(kFirmwarePath))
+    result = InvalidImage;
+  firmwareTransfer.validate(result == Ok);
+  if (!firmwareTransfer.validated()) Storage.remove(kFirmwarePath);
+  LOG_INF("SYNC", "firmware staged: status %u, %lu bytes", result, static_cast<unsigned long>(incoming.received));
+  sendStatus(FirmwareStaged, result);
+}
+
+void onFirmwareCommit() {
+  if (!firmwareAuthorized.load() || !firmwareTransfer.validated()) {
+    sendStatus(FirmwareResult, BadRequest);
+    return;
+  }
+  if (!host.canUpdateFirmware || !host.canUpdateFirmware()) {
+    sendStatus(FirmwareResult, LowBattery);
+    return;
+  }
+  // Let the accepted notification reach the phone, then release BLE's heap
+  // before flashing. The phone confirms completion by reconnecting after boot.
+  firmwareTransfer.commit(nowMs());
+  sendStatus(FirmwareResult, Ok);
+}
+
+bool installPendingFirmware() {
+  if (!firmwareTransfer.installDue(nowMs())) return false;
+  firmwareTransfer.clear();
+  return true;
 }
 
 void onDelete(const uint8_t* payload, const size_t len) {
@@ -306,6 +405,7 @@ void onDelete(const uint8_t* payload, const size_t len) {
 void handleFrame(const uint8_t* frame, const size_t len) {
   const uint8_t* payload = frame + 1;
   const size_t payloadLen = len - 1;
+  if (firmwareTransfer.committed()) return;
   switch (frame[0]) {
     case Hello:
       onHello(payload, payloadLen);
@@ -314,16 +414,44 @@ void handleFrame(const uint8_t* frame, const size_t len) {
       onList();
       break;
     case PutBegin:
+      if (firmwareTransfer.busy()) {
+        sendStatus(PutReady, Busy);
+        break;
+      }
       onPutBegin(payload, payloadLen);
       break;
     case PutData:
-      onPutData(payload, payloadLen);
+      if (incoming.kind == TransferKind::Article) onPutData(payload, payloadLen);
       break;
     case PutEnd:
       onPutEnd();
       break;
     case Delete:
       onDelete(payload, payloadLen);
+      break;
+    case FirmwareBegin:
+      onFirmwareBegin(payload, payloadLen);
+      break;
+    case FirmwareData:
+      if (incoming.kind == TransferKind::Firmware && firmwareAuthorized.load()) onPutData(payload, payloadLen);
+      break;
+    case FirmwareEnd:
+      if (payloadLen == 0)
+        onFirmwareEnd();
+      else
+        sendStatus(FirmwareStaged, BadRequest);
+      break;
+    case FirmwareAbort:
+      if (firmwareAuthorized.load() && payloadLen == 0) {
+        if (incoming.kind == TransferKind::Firmware) abandonIncoming();
+        clearFirmwareStage();
+      }
+      break;
+    case FirmwareCommit:
+      if (payloadLen == 0)
+        onFirmwareCommit();
+      else
+        sendStatus(FirmwareResult, BadRequest);
       break;
     case Bye:
       byeAtMs = nowMs() | 1u;
@@ -338,6 +466,7 @@ void handleFrame(const uint8_t* frame, const size_t len) {
 
 class ServerEvents final : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& info) override {
+    firmwareAuthorized.store(false);
     connHandle.store(info.getConnHandle());
     mtu.store(23);
     bondsAtConnect.store(NimBLEDevice::getNumBonds());
@@ -352,6 +481,7 @@ class ServerEvents final : public NimBLEServerCallbacks {
   }
   void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason) override {
     LOG_INF("SYNC", "phone disconnected (reason 0x%x)", reason);
+    firmwareAuthorized.store(false);
     linked.store(false);
     linkDropped.store(true);
     connHandle.store(BLE_HS_CONN_HANDLE_NONE);
@@ -359,6 +489,9 @@ class ServerEvents final : public NimBLEServerCallbacks {
   void onMTUChange(const uint16_t value, NimBLEConnInfo&) override { mtu.store(value); }
   void onAuthenticationComplete(NimBLEConnInfo& info) override {
     LOG_INF("SYNC", "security: encrypted %d bonded %d", info.isEncrypted(), info.isBonded());
+    const bool permitted =
+        bondsAtConnect.load() == 0 || NimBLEDevice::getNumBonds() <= bondsAtConnect.load() || pairingOpen.load();
+    firmwareAuthorized.store(info.isEncrypted() && info.isBonded() && permitted);
     // The first device pairs anywhere. After that a new one is turned away unless the Articles
     // screen is open, so a stranger nearby cannot pair with a reader lying on a table.
     if (info.isBonded() && bondsAtConnect.load() >= 1 && NimBLEDevice::getNumBonds() > bondsAtConnect.load() &&
@@ -440,8 +573,9 @@ bool startRadio() {
 }
 
 void stopRadio() {
-  if (!radioOn) return;
   abandonIncoming();
+  if (firmwareTransfer.busy()) clearFirmwareStage();
+  if (!radioOn) return;
   NimBLEDevice::deinit(true);
   txChar = nullptr;
   linked.store(false);
@@ -461,6 +595,7 @@ bool pump() {
   if (!radioOn) return false;
   if (linkDropped.exchange(false)) {
     abandonIncoming();
+    if (!firmwareTransfer.committed()) clearFirmwareStage();
     // A phone that said BYE and left has finished: byeAtMs stays, and the radio stops.
     if (queue && byeAtMs == 0) xMessageBufferReset(queue);
   }
@@ -506,6 +641,17 @@ void tick(const Where where, const bool storageBusy, const bool wifiOn) {
     return;
   }
   pump();
+  if (!firmwareTransfer.committed() && nowMs() - lastFrameMs > 30000) {
+    if (incoming.active && incoming.kind == TransferKind::Firmware) abandonIncoming();
+    if (firmwareTransfer.busy()) clearFirmwareStage();
+  }
+  if (installPendingFirmware()) {
+    stopRadio();
+    if (host.installFirmware) host.installFirmware(kFirmwarePath);
+    clearFirmwareStage();
+    idleStopped = false;
+    return;
+  }
   if (byeLingerOver()) {
     byeAtMs = 0;
     // On Articles the link stays: an article loaded on the phone a moment later arrives at once.
@@ -537,6 +683,12 @@ void syncBeforeSleep() {
   lastFrameMs = start;
   while (true) {
     pump();
+    if (installPendingFirmware()) {
+      stopRadio();
+      if (host.installFirmware) host.installFirmware(kFirmwarePath);
+      clearFirmwareStage();
+      return;
+    }
     const uint32_t now = nowMs();
     if (byeLingerOver()) break;
     if (host.buttonPressed && now - start > 500 && host.buttonPressed()) break;
@@ -560,7 +712,14 @@ void forgetPhone() {
   idleStopped = false;
 }
 
-Status status() { return {true, radioOn, linked.load(), incoming.active, receivedThisBoot}; }
+Status status() {
+  return {true,
+          radioOn,
+          linked.load(),
+          incoming.active || firmwareTransfer.busy(),
+          firmwareTransfer.busy(),
+          receivedThisBoot};
+}
 uint32_t storeGeneration() { return generation; }
 
 }  // namespace phonesync
@@ -573,7 +732,7 @@ void tick(Where, bool, bool) {}
 bool stop(uint32_t) { return true; }
 void syncBeforeSleep() {}
 void forgetPhone() {}
-Status status() { return {false, false, false, false, 0}; }
+Status status() { return {false, false, false, false, false, 0}; }
 uint32_t storeGeneration() { return 0; }
 }  // namespace phonesync
 

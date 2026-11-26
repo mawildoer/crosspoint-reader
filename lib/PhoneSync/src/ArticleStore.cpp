@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -50,17 +51,19 @@ bool readLines(const char* path, OnLine&& onLine) {
   return true;
 }
 
-// Splits "id\ttime\tsource\ttitle\tauthor" in place.
-bool splitIndexLine(char* line, char*& id, uint32_t& time, char*& source, char*& title, char*& author) {
-  char* fields[5] = {line, nullptr, nullptr, nullptr, nullptr};
+// The optional sixth field is arrival time; older rows remain readable.
+bool splitIndexLine(char* line, char*& id, uint32_t& time, char*& source, char*& title, char*& author,
+                    uint32_t* addedTime = nullptr) {
+  char* fields[6] = {line, nullptr, nullptr, nullptr, nullptr, nullptr};
   int count = 1;
-  for (char* p = line; *p && count < 5; p++) {
+  for (char* p = line; *p && count < 6; p++) {
     if (*p == '\t') {
       *p = '\0';
       fields[count++] = p + 1;
     }
   }
   if (count < 4 || strlen(fields[0]) != kIdHexLen) return false;
+  if (addedTime) *addedTime = fields[5] ? static_cast<uint32_t>(strtoul(fields[5], nullptr, 10)) : 0;
   id = fields[0];
   time = static_cast<uint32_t>(strtoul(fields[1], nullptr, 10));
   source = fields[2];
@@ -79,6 +82,63 @@ void appendField(std::string& out, const char* text, size_t len) {
 }
 
 }  // namespace
+
+bool TimeSnapshot::load(size_t maxEntries) {
+  stamps.reset();
+  count = 0;
+  bool valid = true;
+  if (!readLines(kIndexPath,
+                 [&](char* line) {
+                   char *id, *source, *title, *author;
+                   uint32_t published;
+                   if (!splitIndexLine(line, id, published, source, title, author)) return true;
+                   if (count == maxEntries) {
+                     valid = false;
+                     return false;
+                   }
+                   ++count;
+                   return true;
+                 }) ||
+      !valid)
+    return false;
+  if (count == 0) return true;
+  stamps = makeUniqueNoThrow<Stamp[]>(count);
+  if (!stamps) return false;
+  size_t written = 0;
+  const bool ok = readLines(kIndexPath, [&](char* line) {
+    char *id, *source, *title, *author;
+    uint32_t published, added;
+    if (!splitIndexLine(line, id, published, source, title, author, &added)) return true;
+    if (written == count) {
+      valid = false;
+      return false;
+    }
+    stamps[written++] = {idValue(id), added, published};
+    return true;
+  });
+  if (!ok || !valid || written != count) {
+    stamps.reset();
+    count = 0;
+    return false;
+  }
+  std::sort(stamps.get(), stamps.get() + count,
+            [](const Stamp& a, const Stamp& b) { return a.id < b.id || (a.id == b.id && a.added > b.added); });
+  return true;
+}
+
+bool TimeSnapshot::lookup(const char* idHex, uint32_t& added, uint32_t& published) const {
+  added = published = 0;
+  if (count == 0 || !stamps) return false;
+  const uint64_t id = idValue(idHex);
+  const Stamp* begin = stamps.get();
+  const Stamp* end = begin + count;
+  const Stamp* found =
+      std::lower_bound(begin, end, id, [](const Stamp& stamp, uint64_t value) { return stamp.id < value; });
+  if (found == end || found->id != id) return false;
+  added = found->added;
+  published = found->published;
+  return true;
+}
 
 bool ensureDir() { return Storage.exists(kDir) || Storage.mkdir(kDir); }
 
@@ -126,31 +186,22 @@ bool contains(const char* idHex) {
 }
 
 bool lookup(const char* idHex, Entry& out) {
-  struct Context {
-    const char* id;
-    Entry* entry;
-    bool found;
-  } context{idHex, &out, false};
-  out.id[0] = 0;
-  out.time = 0;
-  out.read = false;
-  out.source.clear();
-  out.title.clear();
-  out.author.clear();
-  const bool ok = forEach(
-      [](void* raw, const char* id, uint32_t time, const char* source, const char* title, const char* author) {
-        auto& ctx = *static_cast<Context*>(raw);
-        if (strcmp(ctx.id, id) != 0) return true;
-        memcpy(ctx.entry->id, id, kIdHexLen + 1);
-        ctx.entry->time = time;
-        ctx.entry->source = source;
-        ctx.entry->title = title;
-        ctx.entry->author = author;
-        ctx.found = true;
-        return false;
-      },
-      &context);
-  return ok && context.found;
+  bool found = false;
+  out = Entry{};
+  const bool ok = readLines(kIndexPath, [&](char* line) {
+    char *id, *source, *title, *author;
+    uint32_t published, added;
+    if (!splitIndexLine(line, id, published, source, title, author, &added) || strcmp(idHex, id) != 0) return true;
+    memcpy(out.id, id, kIdHexLen + 1);
+    out.time = published;
+    out.addedTime = added;
+    out.source = source;
+    out.title = title;
+    out.author = author;
+    found = true;
+    return false;
+  });
+  return ok && found;
 }
 
 void formatSubtitle(const Entry& entry, std::string& result) {
@@ -178,7 +229,7 @@ void formatDate(uint32_t timestamp, std::string& result) {
 }
 
 bool append(const char* idHex, const uint32_t time, const char* source, const size_t sourceLen, const char* title,
-            const size_t titleLen, const char* author, const size_t authorLen) {
+            const size_t titleLen, const char* author, const size_t authorLen, const uint32_t addedTime) {
   std::string line;
   line.reserve(kIdHexLen + 16 + sourceLen + titleLen + authorLen);
   line += idHex;
@@ -192,6 +243,9 @@ bool append(const char* idHex, const uint32_t time, const char* source, const si
   appendField(line, title, titleLen);
   line += '\t';
   appendField(line, author, authorLen);
+  line += '\t';
+  snprintf(number, sizeof(number), "%lu", static_cast<unsigned long>(addedTime));
+  line += number;
   line += '\n';
   HalFile file = Storage.open(kIndexPath, O_WRONLY | O_CREAT | O_APPEND);
   if (!file) return false;

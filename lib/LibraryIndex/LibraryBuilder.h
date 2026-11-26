@@ -66,7 +66,14 @@ struct BuildStats {
 // book over its filename. It reads an existing cache when available; otherwise
 // it stops the normal EPUB parser at the end of <metadata>, before the manifest,
 // without building the reader's spine, TOC, CSS, or section caches.
-bool buildLibraryIndex(const char* rootPath, BuildStats& stats, bool readMetadata = false);
+struct BookTimes {
+  uint32_t added = 0;
+  uint32_t published = 0;
+};
+// Optional source metadata; zero means the timestamp is unknown.
+using TimeLookup = BookTimes (*)(const void* context, const char* path);
+bool buildLibraryIndex(const char* rootPath, BuildStats& stats, bool readMetadata = false,
+                       TimeLookup timeLookup = nullptr, const void* timeContext = nullptr);
 
 // Live index path, shared by the builder and activity.
 const char* libraryIndexPath();

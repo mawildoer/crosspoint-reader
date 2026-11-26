@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,10 +18,28 @@ inline constexpr size_t kIdHexLen = 16;
 struct Entry {
   char id[kIdHexLen + 1];
   uint32_t time;
+  uint32_t addedTime = 0;
   bool read;
   std::string source;
   std::string title;
   std::string author;
+};
+
+// A rebuild-only snapshot: two streaming passes, then O(log N) lookup.
+// No strings are retained. At most 16 bytes/entry, released after rebuilding.
+class TimeSnapshot {
+ public:
+  bool load(size_t maxEntries);
+  bool lookup(const char* idHex, uint32_t& added, uint32_t& published) const;
+
+ private:
+  struct Stamp {
+    uint64_t id;
+    uint32_t added;
+    uint32_t published;
+  };
+  std::unique_ptr<Stamp[]> stamps;
+  size_t count = 0;
 };
 
 bool ensureDir();
@@ -41,7 +60,7 @@ bool lookup(const char* idHex, Entry& out);
 void formatSubtitle(const Entry& entry, std::string& out);
 void formatDate(uint32_t timestamp, std::string& out);
 bool append(const char* idHex, uint32_t time, const char* source, size_t sourceLen, const char* title, size_t titleLen,
-            const char* author, size_t authorLen);
+            const char* author, size_t authorLen, uint32_t addedTime = 0);
 // Removes the article file and its index line. True when it is gone (also when it never existed).
 bool remove(const char* idHex);
 

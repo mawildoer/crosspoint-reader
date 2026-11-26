@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -460,8 +462,10 @@ TEST_F(LibraryBuilderTest, EqualBasenamesInDifferentFoldersReconcileIndependentl
 TEST_F(LibraryBuilderTest, ArrivalOrderFollowsModificationTimeOverDiscoveryOrder) {
   // a and b exist with the default time; c lands with an older timestamp and d
   // with the newest, so file times, not walk or firstSeen order, decide.
+  fake::files["/a.epub"]->time = (46u << 25) | (11u << 21) | (25u << 16) | (10u << 11);
+  fake::files["/b.epub"]->time = fake::files["/a.epub"]->time;
   fake::add("/c.epub", "book c", /*time=*/0);
-  fake::add("/d.epub", "book d", /*time=*/9);
+  fake::add("/d.epub", "book d", /*time=*/fake::files["/a.epub"]->time + 1);
   ASSERT_TRUE(buildLibraryIndex("/", stats, true));
 
   LibraryIndexFile index;
@@ -647,4 +651,83 @@ TEST_F(LibraryBuilderTest, SortAllocationFailureProducesValidDegradedIndex) {
   LibraryIndexFile index;
   ASSERT_TRUE(index.open(INDEX));
   EXPECT_EQ(index.bookCount(), 513);
+}
+
+TEST_F(LibraryBuilderTest, AddedAndPublishedUseIndependentSecondResolutionTimestamps) {
+  const auto times = +[](const void*, const char* path) -> BookTimes {
+    if (std::strcmp(path, "/a.epub") == 0) return {1795640401, 1795554002};
+    if (std::strcmp(path, "/b.epub") == 0) return {1795640402, 1795554001};
+    return {};
+  };
+  fake::add("/undated.epub");
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true, times));
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 0), "/b.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 1), "/a.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::PublishedDesc, 0), "/a.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::PublishedDesc, 1), "/b.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::PublishedDesc, 2), "/undated.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::PublishedAsc, 0), "/undated.epub");
+  index.close();
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true, times));
+  ASSERT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 0), "/b.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::PublishedDesc, 0), "/a.epub");
+}
+
+TEST_F(LibraryBuilderTest, AddedNormalizesPackedFatBooksAgainstUnixArticleArrivals) {
+  const char* previousTZ = std::getenv("TZ");
+  const std::string savedTZ = previousTZ ? previousTZ : "";
+  const bool hadTZ = previousTZ != nullptr;
+  setenv("TZ", "UTC", 1);
+  tzset();
+  const uint32_t fat = (46u << 25) | (11u << 21) | (25u << 16) | (10u << 11);
+  EXPECT_EQ(fatTimestampToUnix(fat), 1795600800u);
+  EXPECT_EQ(fatTimestampToUnix(1), 0u);
+  fake::files["/a.epub"]->time = fat;
+  const auto times = +[](const void*, const char* path) -> BookTimes {
+    return std::strcmp(path, "/b.epub") == 0 ? BookTimes{1795600799, 1795500000} : BookTimes{};
+  };
+  EXPECT_TRUE(buildLibraryIndex("/", stats, true, times));
+  LibraryIndexFile index;
+  EXPECT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 0), "/a.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 1), "/b.epub");
+  if (hadTZ)
+    setenv("TZ", savedTZ.c_str(), 1);
+  else
+    unsetenv("TZ");
+  tzset();
+}
+
+TEST_F(LibraryBuilderTest, TimezoneChangeInvalidatesAddedRanksAndDefeatsUnchangedFastPath) {
+  const char* previousTZ = std::getenv("TZ");
+  const std::string savedTZ = previousTZ ? previousTZ : "";
+  const bool hadTZ = previousTZ != nullptr;
+  setenv("TZ", "UTC", 1);
+  tzset();
+  fake::files["/a.epub"]->time = (46u << 25) | (11u << 21) | (25u << 16) | (10u << 11);
+  const auto times = +[](const void*, const char* path) -> BookTimes {
+    return std::strcmp(path, "/b.epub") == 0 ? BookTimes{1795602600, 1795500000} : BookTimes{};
+  };
+  EXPECT_TRUE(buildLibraryIndex("/", stats, true, times));
+  LibraryIndexFile index;
+  EXPECT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 0), "/b.epub");
+  index.close();
+  setenv("TZ", "UTC+1", 1);
+  tzset();  // FAT 10:00 now maps to 11:00 UTC.
+  EXPECT_FALSE(index.open(INDEX));
+  EXPECT_EQ(index.validity(), ClixValidity::StaleTimeContext);
+  BuildStats rebuilt;
+  EXPECT_TRUE(buildLibraryIndex("/", rebuilt, true, times));
+  EXPECT_TRUE(rebuilt.indexReplaced);
+  EXPECT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 0), "/a.epub");
+  if (hadTZ)
+    setenv("TZ", savedTZ.c_str(), 1);
+  else
+    unsetenv("TZ");
+  tzset();
 }

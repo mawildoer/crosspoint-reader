@@ -47,6 +47,7 @@
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/FirmwareFlasher.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/PluginEvents.h"
@@ -268,7 +269,25 @@ bool buttonPressed() {
   gpio.update();
   return gpio.wasAnyPressed();
 }
-const phonesync::Host host{batteryPercent, holdFullSpeed, buttonPressed, CROSSPOINT_VERSION};
+bool canUpdateFirmware() { return gpio.isUsbConnected() || batteryPercent() >= 30; }
+bool validateFirmware(const char* path) {
+  const auto result = firmware_flash::validateImageFile(path, 0x640000);
+  LOG_INF("SYNC", "firmware validation: %s", firmware_flash::resultName(result));
+  return result == firmware_flash::Result::OK;
+}
+bool installFirmware(const char* path) {
+  powerManager.setPowerSaving(false);
+  const auto result = firmware_flash::flashFromSdPath(path, nullptr, nullptr);
+  LOG_INF("SYNC", "firmware install: %s", firmware_flash::resultName(result));
+  if (result != firmware_flash::Result::OK) return false;
+  Storage.remove(path);
+  armSilentReboot(SILENT_REBOOT_TARGET_HOME);
+  logSerial.flush();
+  ESP.restart();
+  return true;
+}
+const phonesync::Host host{batteryPercent,    holdFullSpeed,    buttonPressed,  CROSSPOINT_VERSION,
+                           canUpdateFirmware, validateFirmware, installFirmware};
 }  // namespace phonesynchost
 
 // Bluetooth page turner (lib/BlePageTurner): what the module may ask of this firmware. The module
@@ -958,7 +977,7 @@ void loop() {
                          halTiltSensor.hadActivity() || remoteActed;
   if (userInput) lastInputTime = millis();
   idleDisplayWhileAwake();
-  if (userInput || activityManager.preventAutoSleep()) {
+  if (userInput || activityManager.preventAutoSleep() || phonesync::status().updatingFirmware) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }

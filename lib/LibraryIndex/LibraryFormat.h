@@ -11,7 +11,7 @@
 //   header        64 bytes of struct, padded to 512
 //   folders       F variable-length records; the id of a folder IS its ordinal
 //   records       N x exactly 128 bytes, in folded-title order
-//   permutations  authorOrder[N] then arrivalOrder[N], both u16
+//   permutations  authorOrder[N], arrivalOrder[N], and optional publicationOrder[N], all u16
 //   names         path hash, filename, display author, title, and source author blobs
 //
 // The fixed 128-byte record stride is the load-bearing choice: record k lives at
@@ -33,7 +33,7 @@ inline constexpr uint8_t CLIX_FORMAT_VERSION = 2;
 // Bump when the fold or a permutation's sort key changes.
 // Forces fold and ranks to be rebuilt while firstSeen values are preserved, so
 // arrival history survives.
-inline constexpr uint8_t CLIX_FOLD_VERSION = 5;
+inline constexpr uint8_t CLIX_FOLD_VERSION = 6;
 
 inline constexpr uint32_t CLIX_ALIGN = 512;
 inline constexpr size_t CLIX_FOLD_BYTES = 96;
@@ -58,6 +58,7 @@ inline uint64_t clixPathHash(const char* data, const size_t len) {
 enum ClixFlags : uint8_t {
   CLIX_FLAG_RANKS_DEGRADED = 1 << 0,
   CLIX_FLAG_DEDUP_DEGRADED = 1 << 1,
+  CLIX_FLAG_PUBLICATION_ORDER = 1 << 2,
 };
 
 enum ClixMetadataStatus : uint8_t {
@@ -123,7 +124,8 @@ inline void layoutSections(ClixHeader& h, const uint32_t folderBytes, const uint
   h.folderLen = folderBytes;
   h.recordStart = alignUp(h.folderStart + folderBytes);
   h.permStart = alignUp(h.recordStart + static_cast<uint32_t>(h.bookCount) * sizeof(ClixRecord));
-  h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) * 2u * sizeof(uint16_t));
+  h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) *
+                                          ((h.flags & CLIX_FLAG_PUBLICATION_ORDER) ? 3u : 2u) * sizeof(uint16_t));
   h.nameLen = nameBytes;
   h.selfSize = h.nameStart + nameBytes;
 }
@@ -138,6 +140,10 @@ inline uint32_t arrivalOrderOffset(const ClixHeader& h, const uint16_t k) {
   return h.permStart + (static_cast<uint32_t>(h.bookCount) + k) * sizeof(uint16_t);
 }
 
+inline uint32_t publicationOrderOffset(const ClixHeader& h, const uint16_t k) {
+  return h.permStart + (static_cast<uint32_t>(h.bookCount) * 2u + k) * sizeof(uint16_t);
+}
+
 // Why a loaded index was rejected. Reported rather than swallowed so a rebuild
 // loop caused by a format bug shows up in the log instead of looking like a slow
 // first boot.
@@ -146,6 +152,7 @@ enum class ClixValidity : uint8_t {
   BadMagic,
   UnknownFormatVersion,
   StaleFoldVersion,
+  StaleTimeContext,
   SizeMismatch,  // truncated, or a build interrupted before the final rename
   CountOutOfRange,
   SectionsInconsistent,
@@ -182,6 +189,11 @@ inline ClixValidity validateHeader(const ClixHeader& h, const uint64_t actualFil
   if (structure != ClixValidity::Ok) return structure;
   return h.foldVersion == CLIX_FOLD_VERSION ? ClixValidity::Ok : ClixValidity::StaleFoldVersion;
 }
+
+// FAT timestamps are local wall time; preserve raw values separately for freshness.
+uint32_t fatTimestampToUnix(uint32_t packed);
+void setTimeContext(ClixHeader& header);
+bool timeContextMatches(const ClixHeader& header);
 
 const char* clixValidityName(ClixValidity v);
 

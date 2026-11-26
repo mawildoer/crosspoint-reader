@@ -34,6 +34,9 @@ bool LibraryIndexFile::openImpl(const char* path, const bool acceptStaleFold) {
 
   lastValidity =
       acceptStaleFold ? validateHeaderStructure(head, file.fileSize64()) : validateHeader(head, file.fileSize64());
+  if (!acceptStaleFold && lastValidity == ClixValidity::Ok && (head.flags & CLIX_FLAG_PUBLICATION_ORDER) &&
+      !timeContextMatches(head))
+    lastValidity = ClixValidity::StaleTimeContext;
   if (lastValidity != ClixValidity::Ok) {
     LOG_INF("LIBIDX", "index rejected: %s", clixValidityName(lastValidity));
     file.close();
@@ -76,6 +79,14 @@ uint16_t LibraryIndexFile::ordinalForRow(const SortOrder order, const uint16_t r
       const uint16_t k = order == SortOrder::AuthorAsc ? row : static_cast<uint16_t>(head.bookCount - 1 - row);
       uint16_t ordinal = NONE;
       return readAt(authorOrderOffset(head, k), &ordinal, sizeof(ordinal)) && ordinal < head.bookCount ? ordinal : NONE;
+    }
+    case SortOrder::PublishedAsc:
+    case SortOrder::PublishedDesc: {
+      if (!(head.flags & CLIX_FLAG_PUBLICATION_ORDER)) return NONE;
+      const uint16_t k = order == SortOrder::PublishedAsc ? row : static_cast<uint16_t>(head.bookCount - 1 - row);
+      uint16_t ordinal = NONE;
+      return readAt(publicationOrderOffset(head, k), &ordinal, sizeof(ordinal)) && ordinal < head.bookCount ? ordinal
+                                                                                                            : NONE;
     }
     case SortOrder::RecentAsc:
     case SortOrder::RecentDesc: {

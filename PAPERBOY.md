@@ -6,7 +6,8 @@ The phone fetches content using its own subscriptions and sends EPUB files over 
 
 ## Added behavior
 
-- Home opens the unified Library. Books and articles share its Recent, Title and Author views; articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
+- Home opens the unified Library. Books and articles share its Added, Published, Title and Author views; articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
+- Firmware can be updated from the phone over the bonded Bluetooth link after one USB bootstrap installation. The reader stages and validates the image on SD, requires USB power or at least 30% battery, writes the inactive OTA slot, and restarts in Library for version verification.
 - Phone sync runs in the Library and briefly before sleep. The list refreshes after article transfers settle. It stops while reading to release RAM.
 - Articles use the normal reading-position files and recent-books list. Opening an article does not mark it finished. Completion requires the final page of a fully generated final section or the end-of-book screen.
 - X3 stays awake while USB power is detected and starts a fresh idle timeout after unplugging. A USB-powered cold boot continues into the reader. The power button still permits manual sleep.
