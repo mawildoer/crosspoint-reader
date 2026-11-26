@@ -6,8 +6,10 @@ The phone fetches content using its own subscriptions and sends EPUB files over 
 
 ## Added behavior
 
-- Home opens the unified Library. Books and articles share its Added, Published, Title and Author views; articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
+- The default sleep screen uses the Paperboy artwork and wordmark. Custom and cover sleep-screen modes retain their selected behavior.
+- Home opens the unified Library. Books and articles share its Touched, Added and Published views (all newest first); articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
 - Firmware can be updated from the phone over the bonded Bluetooth link after one USB bootstrap installation. The reader stages and validates the image on SD, requires USB power or at least 30% battery, writes the inactive OTA slot, and restarts in Library for version verification.
+- A phone Bump command changes only an article’s Touched position. Opening books and articles also updates Touched, without changing arrival/publication dates or progress.
 - Phone sync runs in the Library and briefly before sleep. The list refreshes after article transfers settle. It stops while reading to release RAM.
 - Articles use the normal reading-position files and recent-books list. Opening an article does not mark it finished. Completion requires the final page of a fully generated final section or the end-of-book screen.
 - X3 stays awake while USB power is detected and starts a fresh idle timeout after unplugging. A USB-powered cold boot continues into the reader. The power button still permits manual sleep.
@@ -48,6 +50,52 @@ On the X3, check Back from the rows to the tabs and then Menu, holding Back from
 At full charge, USB detection is reliable only with an active computer host. A wall charger, power bank, or sleeping computer may not be detected. The cold-boot behavior does not guarantee that cable insertion wakes every deep-sleep state.
 
 This branch is development firmware, not an upstream release or endorsement. No subscription credentials, device backups, or built firmware images are included.
+
+### Paperboy 0.3.0: Touched library and Bump
+
+Library now exposes exactly Touched, Added, and Published, newest first. Touched
+is the default. Opening a document or receiving a phone Bump moves it in Touched;
+Added, Published, and reading progress are unchanged. Untouched documents and
+ties follow Added order. The phone queues bumps until this protocol-2 firmware
+is installed; protocol-1 phones can still sync articles.
+
+The reader owns touch history in checked 16-byte records under
+`/.crosspoint/library-touches`, sharded by path hash. A persistent counter gives
+local opens and phone bumps one ordering without relying on a reader clock.
+Records follow shared rename/move transactions and are removed with their
+document. The index stores a Touched permutation; rebuilding needs a checked
+two-byte Added rank per book and reuses four-byte timestamp scratch for each
+date order. At 4,096 books these arrays total 24 KiB, released after rebuilding.
+There is no resident touch-history cache. This adds small SD writes when opening
+documents and an SD read per document during rebuilds; physical SD latency and
+heap behavior still require hardware checks.
+
+Validation: 86 library/format/move tests and the article/touch-store host checks
+passed, including short writes, interrupted renames, idempotent bumps, rollback,
+and a 4,096-document sharding corpus. Four independent read-only reviews covered
+correctness, architecture, embedded resources, and i18n/docs, with one follow-up
+round. Recovery, shared move ownership, and directory layout findings were fixed
+and reviewed; the final stale documentation phrase was corrected. No verified
+finding remains. The logo is generated from the companion app's Paperboy artwork.
+Final `default` and `gh_release` builds passed with version `0.3.0-paperboy`;
+formatting, diff whitespace checks, and workflow validation passed. The existing
+NimBLE service-start deprecation warning remains. The SDK stays pinned at
+`3f3e4c1`. The requested behavior and fork ownership follow the human's three-view,
+Bump, and branding requirements; the requested delivery route is TestFlight then
+Bluetooth, with no upstream PR.
+
+Install through TestFlight and then the app's Bluetooth firmware updater. On the
+X3, check that the app reconnects and reports `0.3.0-paperboy`; interrupted
+transfers must not report installation success. Verify the three tabs in portrait,
+inverted portrait, and both landscape orientations, including any button remapping.
+Read part of an article, return to Library, bump a different loaded article, and
+confirm the Touched order changes while Added/Published and both reading
+positions remain unchanged. Repeat a bump after disconnect/reconnect, then rename
+or move a test document and confirm its touch position follows it. Sleep with the
+default mode to see Paperboy; custom/cover modes should retain their selection.
+Check repeated reader/Library transitions for leaks, more than 50 KiB free C3
+heap, the largest free block, and acceptable rebuild latency. These are pending
+human hardware checks for this release; host results do not establish them.
 
 ## Pairing
 

@@ -46,6 +46,7 @@ struct StagedEntry {
   ClixRecord record;
   uint32_t addedTime;
   uint32_t publishedTime;
+  uint32_t touchedSequence;
   uint64_t pathHash;
   char name[STAGE_NAME_BYTES];
   // Cleaned source spelling from this book. The spelling actually shown
@@ -286,6 +287,8 @@ struct WalkState {
   bool dedupDegraded = false;
   bool failed = false;
   bool readMetadata = false;
+  uint32_t maxTouched = 0;
+  uint32_t touchGeneration = 0;
   TimeLookup timeLookup = nullptr;
   const void* timeContext = nullptr;
   LibraryIndexFile* previous = nullptr;
@@ -423,6 +426,12 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
   entry.record.fileSize = fileSize;
   entry.record.modificationTime = modificationTime;
   const BookTimes times = st.timeLookup ? st.timeLookup(st.timeContext, fullPath.c_str()) : BookTimes{};
+  if (!times.valid) {
+    st.failed = true;
+    return false;
+  }
+  entry.touchedSequence = times.touched;
+  st.maxTouched = std::max(st.maxTouched, times.touched);
   entry.addedTime = times.added != 0 ? times.added : fatTimestampToUnix(modificationTime);
   entry.publishedTime = times.published;
 
@@ -622,8 +631,10 @@ bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order
   header.nextFirstSeen = st.nextFirstSeen;
   header.metadataEnabled = st.readMetadata;
   // Placeholder only. Degradations are known after the sorts have run.
-  header.flags = CLIX_FLAG_PUBLICATION_ORDER;
+  header.flags = CLIX_FLAG_PUBLICATION_ORDER | CLIX_FLAG_TOUCHED_ORDER;
   setTimeContext(header);
+  const uint32_t touchRevision = std::max(st.maxTouched, st.touchGeneration);
+  memcpy(header.reserved + 4, &touchRevision, sizeof(touchRevision));
   // The blob is the LAST section, so its size affects only selfSize — every
   // section offset is already fixed by the counts. Lay out with a placeholder
   // and correct selfSize once the blob has actually been written, since the
@@ -1023,37 +1034,45 @@ bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order
     const uint16_t ordinal = arrivalOrder[k];
     put(&ordinal, sizeof(ordinal));
   }
-  // Reuse the arrival permutation's allocation after writing it. Publication
-  // keys are temporary (4 bytes/book); the UI pages the resulting SD order.
-  for (uint16_t i = 0; i < n; i++) arrivalOrder[i] = i;
-  if (rankable && n > 1) {
-    auto times = makeUniqueNoThrow<uint32_t[]>(n);
-    if (!times) {
-      LOG_ERR("LIBIDX", "publication keys allocation failed; retaining previous index");
-      outBuffer.flush();
-      out.close();
-      Storage.remove(NEW_PATH);
-      return false;
-    }
-    for (uint16_t i = 0; i < n; i++) {
-      serviceBuilder(serviceUnits);
-      if (!readStageAt(static_cast<uint64_t>(order[i]) * STAGE_STRIDE + offsetof(StagedEntry, publishedTime), &times[i],
-                       sizeof(times[i])))
-        break;
-    }
-    if (ioFailed) {
-      outBuffer.flush();
-      out.close();
-      Storage.remove(NEW_PATH);
-      return false;
-    }
-    std::sort(arrivalOrder.get(), arrivalOrder.get() + n,
-              [t = times.get()](uint16_t a, uint16_t b) { return t[a] < t[b] || (t[a] == t[b] && a < b); });
+  auto addedRanks = makeUniqueNoThrow<uint16_t[]>(n == 0 ? 1 : n);
+  if (!addedRanks) {
+    outBuffer.flush();
+    out.close();
+    Storage.remove(NEW_PATH);
+    return false;
   }
-  for (uint16_t k = 0; k < n; k++) {
-    serviceBuilder(serviceUnits);
-    const uint16_t ordinal = arrivalOrder[k];
-    put(&ordinal, sizeof(ordinal));
+  for (uint16_t k = 0; k < n; ++k) addedRanks[arrivalOrder[k]] = k;
+  for (const size_t keyOffset : {offsetof(StagedEntry, publishedTime), offsetof(StagedEntry, touchedSequence)}) {
+    for (uint16_t i = 0; i < n; i++) arrivalOrder[i] = i;
+    if (rankable && n > 1) {
+      auto times = makeUniqueNoThrow<uint32_t[]>(n);
+      if (!times) {
+        outBuffer.flush();
+        out.close();
+        Storage.remove(NEW_PATH);
+        return false;
+      }
+      for (uint16_t i = 0; i < n; i++) {
+        serviceBuilder(serviceUnits);
+        if (!readStageAt(static_cast<uint64_t>(order[i]) * STAGE_STRIDE + keyOffset, &times[i], sizeof(times[i])))
+          break;
+      }
+      if (ioFailed) {
+        outBuffer.flush();
+        out.close();
+        Storage.remove(NEW_PATH);
+        return false;
+      }
+      std::sort(arrivalOrder.get(), arrivalOrder.get() + n,
+                [t = times.get(), rank = addedRanks.get()](uint16_t a, uint16_t b) {
+                  return t[a] < t[b] || (t[a] == t[b] && rank[a] < rank[b]);
+                });
+    }
+    for (uint16_t k = 0; k < n; k++) {
+      serviceBuilder(serviceUnits);
+      const uint16_t ordinal = arrivalOrder[k];
+      put(&ordinal, sizeof(ordinal));
+    }
   }
   padTo(header.nameStart);
 
@@ -1084,7 +1103,8 @@ bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order
   const uint32_t written = static_cast<uint32_t>(outBuffer.position());
   if (!outBuffer.flush()) ioFailed = true;
 
-  header.flags = CLIX_FLAG_PUBLICATION_ORDER | (stats.ranksDegraded ? CLIX_FLAG_RANKS_DEGRADED : 0) |
+  header.flags = CLIX_FLAG_PUBLICATION_ORDER | CLIX_FLAG_TOUCHED_ORDER |
+                 (stats.ranksDegraded ? CLIX_FLAG_RANKS_DEGRADED : 0) |
                  (stats.dedupDegraded ? CLIX_FLAG_DEDUP_DEGRADED : 0);
 
   if (!out.seekSet(0)) {
@@ -1153,7 +1173,7 @@ bool markLibraryIndexDirty() {
 bool isLibraryIndexDirty() { return dirtyInMemory || Storage.exists(DIRTY_PATH); }
 
 bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readMetadata, const TimeLookup timeLookup,
-                       const void* timeContext) {
+                       const void* timeContext, const uint32_t touchGeneration) {
   const uint32_t startMs = millis();
   uint32_t serviceUnits = 0;
   stats = BuildStats{};
@@ -1235,6 +1255,7 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
   st.readMetadata = readMetadata;
   st.timeLookup = timeLookup;
   st.timeContext = timeContext;
+  st.touchGeneration = touchGeneration;
   st.previous = previous.isOpen() ? &previous : nullptr;
   st.stats = &stats;
 
@@ -1275,7 +1296,8 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
   stats.unchanged = st.reused;
   stats.enriched = st.enriched;
 
-  if (previous.isOpen() && timeContextMatches(previous.header()) && st.books == priorCount && st.reused == priorCount &&
+  if (previous.isOpen() && touchedRevision(previous.header()) == std::max(st.maxTouched, st.touchGeneration) &&
+      timeContextMatches(previous.header()) && st.books == priorCount && st.reused == priorCount &&
       stats.metadataReused == priorCount && st.unreadableSkipped == 0) {
     previous.close();
     Storage.remove(STAGE_PATH);

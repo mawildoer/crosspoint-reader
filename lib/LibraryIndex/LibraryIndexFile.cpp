@@ -68,6 +68,15 @@ uint16_t LibraryIndexFile::ordinalForRow(const SortOrder order, const uint16_t r
   if (!opened || row >= head.bookCount) return NONE;
 
   switch (order) {
+    case SortOrder::TouchedDesc: {
+      if (!(head.flags & CLIX_FLAG_TOUCHED_ORDER)) return NONE;
+      uint16_t ordinal = NONE;
+      return readAt(touchedOrderOffset(head, static_cast<uint16_t>(head.bookCount - 1 - row)), &ordinal,
+                    sizeof(ordinal)) &&
+                     ordinal < head.bookCount
+                 ? ordinal
+                 : NONE;
+    }
     case SortOrder::TitleAsc:
       // The record section IS in title order, so this costs no storage and no
       // read at all.

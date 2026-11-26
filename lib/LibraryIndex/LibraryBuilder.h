@@ -69,11 +69,14 @@ struct BuildStats {
 struct BookTimes {
   uint32_t added = 0;
   uint32_t published = 0;
+  uint32_t touched = 0;
+  bool valid = true;
 };
 // Optional source metadata; zero means the timestamp is unknown.
 using TimeLookup = BookTimes (*)(const void* context, const char* path);
 bool buildLibraryIndex(const char* rootPath, BuildStats& stats, bool readMetadata = false,
-                       TimeLookup timeLookup = nullptr, const void* timeContext = nullptr);
+                       TimeLookup timeLookup = nullptr, const void* timeContext = nullptr,
+                       uint32_t touchGeneration = 0);
 
 // Live index path, shared by the builder and activity.
 const char* libraryIndexPath();

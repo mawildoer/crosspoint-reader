@@ -2,6 +2,7 @@
 #include <fcntl.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -9,7 +10,10 @@
 #include <vector>
 inline std::map<std::string, std::string> files;
 inline bool shortWrite = false;
+inline int writeCount = 0, shortWriteAt = 0;
 inline int readCount = 0, failReadAt = 0;
+inline int renameCount = 0, failRenameAt = 0;
+inline std::map<std::string, int> openHandles;
 class HalFile {
   std::string path;
   size_t at = 0;
@@ -18,9 +22,13 @@ class HalFile {
  public:
   HalFile() = default;
   HalFile(std::string p, int flags) : path(p), valid(true) {
+    ++openHandles[path];
     if (flags & O_TRUNC) files[path].clear();
     if (flags & O_APPEND) at = files[path].size();
   }
+  HalFile(const HalFile&) = delete;
+  HalFile& operator=(const HalFile&) = delete;
+  ~HalFile() { close(); }
   explicit operator bool() const { return valid; }
   int read(void* dst, size_t n) {
     if (++readCount == failReadAt) return -1;
@@ -31,7 +39,7 @@ class HalFile {
     return int(n);
   }
   size_t write(const void* src, size_t n) {
-    if (shortWrite) {
+    if (++writeCount == shortWriteAt || shortWrite) {
       n /= 2;
       shortWrite = false;
     }
@@ -46,11 +54,18 @@ class HalFile {
     files[path].resize(n);
     return true;
   }
-  void close() { valid = false; }
+  bool close() {
+    if (valid) --openHandles[path];
+    valid = false;
+    return true;
+  }
 };
 struct FakeStorage {
   bool exists(const char* p) { return files.count(p); }
   bool mkdir(const char* p) {
+    const std::string path(p);
+    for (size_t i = 1; i < path.size(); ++i)
+      if (path[i] == '/') files.try_emplace(path.substr(0, i), "");
     files[p] = "";
     return true;
   }
@@ -59,7 +74,15 @@ struct FakeStorage {
     return HalFile(p, f);
   }
   bool remove(const char* p) {
+    assert(openHandles[p] == 0);
     files.erase(p);
+    return true;
+  }
+  bool rename(const char* from, const char* to) {
+    if (++renameCount == failRenameAt || !exists(from) || exists(to)) return false;
+    assert(openHandles[from] == 0);
+    files[to] = files[from];
+    files.erase(from);
     return true;
   }
   bool replaceFile(const char* a, const char* b) {

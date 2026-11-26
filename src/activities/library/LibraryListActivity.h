@@ -13,8 +13,8 @@
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
 
-// One Library screen: books and articles ordered by added time, publication
-// time, title, or author. Reading a row never changes either timestamp order.
+// One Library screen: books and articles ordered newest first by touched,
+// added, or publication history. Reading a row never changes either timestamp order.
 //
 // The two-slot row is the whole point rather than a styling choice: the problem
 // being solved is "I cannot find my books because I do not know the authors",
@@ -94,7 +94,6 @@ class LibraryListActivity final : public UiTabListActivity {
   void expandGroup(int groupEntry);
   void restoreExpandedList();
   void selectTab(int index, bool toggleIfActive);
-  void toggleSortDirection();
   // Sub-screens act on button press, so a button still held when we resume must
   // not also act here. Records what to swallow on the next release.
   void swallowHeldReleases();
@@ -133,9 +132,9 @@ class LibraryListActivity final : public UiTabListActivity {
 
   library::LibraryIndexFile index;
   int activeTabIndex = 0;
-  library::SortOrder sortOrder = library::SortOrder::RecentDesc;
+  library::SortOrder sortOrder = library::SortOrder::TouchedDesc;
   // Timestamp sorts start newest first; text sorts start ascending.
-  uint8_t descendingTabs = (1u << 0) | (1u << 1);
+
   // Set when the walk finished but the sort did not, so the screen can say the
   // order is discovery order rather than silently showing a wrong one.
   bool degraded = false;

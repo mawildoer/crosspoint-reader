@@ -8,6 +8,7 @@
 #include "FirmwareTransferState.h"
 #include "LibraryRefresh.h"
 #include "Protocol.h"
+void checkTouches();
 using namespace phonesync;
 int main() {
   FirmwareTransferState ota;
@@ -118,6 +119,7 @@ int main() {
   failReadAt = readCount + 1;
   assert(!times.load(4096));
   failReadAt = 0;
+  checkTouches();
   std::cout << "PASS: short append rollback; read-state lookup errors; index preservation on read failure; protocol "
                "CRC; article metadata and date formatting; library refresh debounce and clock wrap\n";
 }

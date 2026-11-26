@@ -2,6 +2,7 @@
 
 #include <Epub.h>
 #include <FsHelpers.h>
+#include <LibraryTouchStore.h>
 #include <Logging.h>
 #include <Xtc.h>
 
@@ -34,6 +35,7 @@ void clearBookCache(const std::string& path) {
 
 bool removeBookFile(const std::string& path) {
   if (!Storage.remove(path.c_str())) return false;
+  library::touches::remove(path.c_str());
   clearBookCache(path);
   return ClippingStore::deleteForFilePath(path, "epub");
 }

@@ -21,6 +21,7 @@ enum class SortOrder : uint8_t {
   // first in Asc; firstSeen breaks ties for filesystems without timestamps.
   RecentAsc,
   RecentDesc,
+  TouchedDesc,
   PublishedAsc,
   PublishedDesc,
   TitleAsc,

@@ -89,7 +89,7 @@ If the frontlight doesn't come back on after the device wakes from sleep, check 
 
 ## Paperboy reading Home
 
-This fork opens the Library for Home. Articles and books are mixed in the same Added/Published/Title/Author lists. Articles use a lined-paper icon with their author, source and publication date; books retain their existing rows. New article deliveries and deletions refresh the library after the sync settles.
+This fork opens the Library for Home. Articles and books are mixed in the same Touched/Added/Published lists. Articles use a lined-paper icon with their author, source and publication date; books retain their existing rows. New article deliveries and deletions refresh the library after the sync settles.
 
 Press Back from the Library tab strip (after clearing any search/group state), or hold Back from a list, to open Menu. Settings, file browsing, transfers, index refresh and phone pairing live there. Touch devices use the leading header control. Reader resume stays unchanged.
 
@@ -136,21 +136,20 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books and articles on the SD card without requiring you to remember their folders. Its four tabs provide different views. An arrow beside a tab shows the sort direction:
+The Library indexes up to 4,096 supported books and articles on the SD card without requiring you to remember their folders. Its three tabs provide newest-first views. Each view uses a downward arrow for newest first:
 
-- **Added** orders books and articles by arrival date and time. Down shows newest first; up shows oldest first. Article arrivals use the phone's timestamp when transfer finishes; books and older articles use available file timestamps, then discovery order. Opening an item does not move it above this order. Hold a row for open, delete, or refresh options.
-- **Published** orders articles by publication date and time. Down shows newest first; up shows oldest first. Books without a publication timestamp appear after dated items in newest-first order.
-- **Title** groups books by the first letter of the title. Up sorts A-Z and down sorts Z-A. Titles beginning with numbers or punctuation appear under `#`; letters from non-English scripts, including Hebrew, have their own groups.
-- **Author** groups books by author. Up sorts A-Z and down sorts Z-A.
+- **Touched** places the most recently opened or phone-bumped item first. Existing recent reads are migrated on the first boot. Untouched items follow Added order. Bumping changes priority without resetting reading position.
+- **Added** orders books and articles by arrival date and time, newest first. New articles use the phone time at delivery; books and older articles use available file timestamps and discovery order.
+- **Published** orders articles by publication date and time, newest first. Undated items follow after dated articles.
 
 On a button-only device:
 
 - Use **Up/Down** or **Left/Right** to move one row at a time. Hold a direction to move a page at a time.
 - Press **Confirm** to open the selected book.
-- Press **Back** from the list to focus the tabs. Press **Confirm** to move to the next tab, or hold **Confirm** to reverse its sort direction. Press **Next** to return to the list; press **Previous** from the tabs to open Search. Holding **Next/Previous** moves between tabs.
-- In the Title or Author views, hold **Confirm** on a book to collapse the list to its letter or author groups. The matching group remains selected. Press **Confirm** to enter a group, or **Back** to restore the exact book and position you came from.
+- Press **Back** from the list to focus the tabs. Press **Confirm** to move to the next view, or hold **Confirm** to move to the previous view. Press **Next** to return to the list; press **Previous** from the tabs to open Search. Holding **Next/Previous** moves between tabs.
+- Hold **Confirm** on a row for Open, Delete, and Refresh Library options.
 
-On a touch device, tap tabs, rows, and the Search icon directly. Tap the active tab again to reverse its sort direction. Swipe to scroll. Long-press a row in Added or Published to open its options. Long-press a row in Title or Author to collapse to the group list, then tap a group to expand it.
+On a touch device, tap a view or row directly, swipe to scroll, and long-press a row for its options. All views stay newest first.
 
 The index is created automatically the first time the Library is opened. Phone sync refreshes it after adding or deleting articles. For other file changes or updated metadata, use **Menu → Refresh Library** or **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
 

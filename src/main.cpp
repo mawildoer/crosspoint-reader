@@ -15,6 +15,7 @@
 #include <HalSystem.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
+#include <LibraryTouchStore.h>
 #include <Logging.h>
 #include <PhoneSync.h>
 #include <SPI.h>
@@ -690,6 +691,12 @@ void setup() {
   // UTC-offset setting on first boot after the update).
   timezones::applyToClock();
   RECENT_BOOKS.loadFromFile();
+  {
+    const auto& recent = RECENT_BOOKS.getBooks();
+    const char* paths[RecentBooksStore::MAX_RECENT_BOOKS];
+    for (size_t i = 0; i < recent.size(); ++i) paths[i] = recent[i].path.c_str();
+    if (!library::touches::initialize(paths, recent.size())) LOG_ERR("LIB", "could not initialize touched history");
+  }
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();

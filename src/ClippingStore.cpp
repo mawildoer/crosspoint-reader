@@ -1,6 +1,7 @@
 #include "ClippingStore.h"
 
 #include <HalStorage.h>
+#include <LibraryTouchStore.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
@@ -67,24 +68,29 @@ bool moveStoreFiles(const std::string& from, const std::string& to, const MovePh
   const std::string source = storeFilePathForBook(from, "epub");
   const std::string target = storeFilePathForBook(to, "epub");
   if (source == target) return true;
-  return std::all_of(std::begin(STORE_SUFFIXES), std::end(STORE_SUFFIXES), [&](const char* suffix) {
-    const std::string oldPath = source + suffix;
-    const std::string newPath = target + suffix;
-    if (phase == MovePhase::Check) {
-      if (Storage.exists(newPath.c_str())) {
-        LOG_ERR("CLIP", "Move would overwrite saved clippings: %s", to.c_str());
-        return false;
-      }
-    } else {
-      const auto& src = phase == MovePhase::Move ? oldPath : newPath;
-      const auto& dst = phase == MovePhase::Move ? newPath : oldPath;
-      if (Storage.exists(src.c_str()) && !Storage.rename(src.c_str(), dst.c_str())) {
-        LOG_ERR("CLIP", "Failed moving clipping state: %s -> %s", src.c_str(), dst.c_str());
-        return false;
-      }
-    }
-    return true;
-  });
+  if (phase == MovePhase::Check && !library::touches::canMove(from.c_str(), to.c_str())) return false;
+  const bool clippingsMoved =
+      std::all_of(std::begin(STORE_SUFFIXES), std::end(STORE_SUFFIXES), [&](const char* suffix) {
+        const std::string oldPath = source + suffix;
+        const std::string newPath = target + suffix;
+        if (phase == MovePhase::Check) {
+          if (Storage.exists(newPath.c_str())) {
+            LOG_ERR("CLIP", "Move would overwrite saved clippings: %s", to.c_str());
+            return false;
+          }
+        } else {
+          const auto& src = phase == MovePhase::Move ? oldPath : newPath;
+          const auto& dst = phase == MovePhase::Move ? newPath : oldPath;
+          if (Storage.exists(src.c_str()) && !Storage.rename(src.c_str(), dst.c_str())) {
+            LOG_ERR("CLIP", "Failed moving clipping state: %s -> %s", src.c_str(), dst.c_str());
+            return false;
+          }
+        }
+        return true;
+      });
+  if (!clippingsMoved || phase == MovePhase::Check) return clippingsMoved;
+  return phase == MovePhase::Move ? library::touches::move(from.c_str(), to.c_str())
+                                  : library::touches::move(to.c_str(), from.c_str());
 }
 
 struct MoveDirectory {

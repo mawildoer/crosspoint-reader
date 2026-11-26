@@ -5,6 +5,7 @@
 #include <HalMemory.h>
 #include <HalStorage.h>
 #include <LibraryBuilder.h>
+#include <LibraryTouchStore.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <NimBLEDevice.h>
@@ -162,7 +163,7 @@ void onHello(const uint8_t* payload, const size_t len) {
     phoneTimeAtMs = nowMs();
   }
   if (len < 1 || payload[0] != kVersion) LOG_INF("SYNC", "phone speaks protocol %u", len ? payload[0] : 0);
-  uint8_t frame[64] = {HelloAck, kVersion};
+  uint8_t frame[64] = {HelloAck, static_cast<uint8_t>(len >= 1 && payload[0] >= 2 ? kVersion : 1)};
   frame[2] = host.batteryPercent ? host.batteryPercent() : 0;
   writeU32(frame + 3, knownFreeMb());
   const char* version = host.firmwareVersion ? host.firmwareVersion : "";
@@ -426,6 +427,18 @@ void handleFrame(const uint8_t* frame, const size_t len) {
     case PutEnd:
       onPutEnd();
       break;
+    case Touch: {
+      if (payloadLen != 12 || readU32(payload + 8) == 0 || incoming.active || firmwareTransfer.busy()) {
+        sendStatus(TouchResult, BadRequest);
+        break;
+      }
+      char id[store::kIdHexLen + 1];
+      idToHex(payload, id);
+      const bool ok = library::touches::record(store::pathFor(id).c_str(), readU32(payload + 8));
+      if (ok) ++generation;
+      sendStatus(TouchResult, ok ? Ok : StorageError);
+      break;
+    }
     case Delete:
       onDelete(payload, payloadLen);
       break;

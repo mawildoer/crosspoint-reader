@@ -33,7 +33,7 @@ inline constexpr uint8_t CLIX_FORMAT_VERSION = 2;
 // Bump when the fold or a permutation's sort key changes.
 // Forces fold and ranks to be rebuilt while firstSeen values are preserved, so
 // arrival history survives.
-inline constexpr uint8_t CLIX_FOLD_VERSION = 6;
+inline constexpr uint8_t CLIX_FOLD_VERSION = 7;
 
 inline constexpr uint32_t CLIX_ALIGN = 512;
 inline constexpr size_t CLIX_FOLD_BYTES = 96;
@@ -59,6 +59,7 @@ enum ClixFlags : uint8_t {
   CLIX_FLAG_RANKS_DEGRADED = 1 << 0,
   CLIX_FLAG_DEDUP_DEGRADED = 1 << 1,
   CLIX_FLAG_PUBLICATION_ORDER = 1 << 2,
+  CLIX_FLAG_TOUCHED_ORDER = 1 << 3,
 };
 
 enum ClixMetadataStatus : uint8_t {
@@ -125,7 +126,9 @@ inline void layoutSections(ClixHeader& h, const uint32_t folderBytes, const uint
   h.recordStart = alignUp(h.folderStart + folderBytes);
   h.permStart = alignUp(h.recordStart + static_cast<uint32_t>(h.bookCount) * sizeof(ClixRecord));
   h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) *
-                                          ((h.flags & CLIX_FLAG_PUBLICATION_ORDER) ? 3u : 2u) * sizeof(uint16_t));
+                                          (2u + ((h.flags & CLIX_FLAG_PUBLICATION_ORDER) ? 1u : 0u) +
+                                           ((h.flags & CLIX_FLAG_TOUCHED_ORDER) ? 1u : 0u)) *
+                                          sizeof(uint16_t));
   h.nameLen = nameBytes;
   h.selfSize = h.nameStart + nameBytes;
 }
@@ -142,6 +145,15 @@ inline uint32_t arrivalOrderOffset(const ClixHeader& h, const uint16_t k) {
 
 inline uint32_t publicationOrderOffset(const ClixHeader& h, const uint16_t k) {
   return h.permStart + (static_cast<uint32_t>(h.bookCount) * 2u + k) * sizeof(uint16_t);
+}
+
+inline uint32_t touchedOrderOffset(const ClixHeader& h, const uint16_t k) {
+  return h.permStart + (static_cast<uint32_t>(h.bookCount) * 3u + k) * sizeof(uint16_t);
+}
+inline uint32_t touchedRevision(const ClixHeader& h) {
+  uint32_t value = 0;
+  for (unsigned i = 0; i < 4; ++i) value |= static_cast<uint32_t>(h.reserved[4 + i]) << (8 * i);
+  return value;
 }
 
 // Why a loaded index was rejected. Reported rather than swallowed so a rebuild
@@ -167,6 +179,8 @@ inline ClixValidity validateHeaderStructure(const ClixHeader& h, const uint64_t 
   }
   if (h.formatVersion != CLIX_FORMAT_VERSION) return ClixValidity::UnknownFormatVersion;
   if (h.bookCount > CLIX_MAX_RECORDS) return ClixValidity::CountOutOfRange;
+  if ((h.flags & CLIX_FLAG_TOUCHED_ORDER) && !(h.flags & CLIX_FLAG_PUBLICATION_ORDER))
+    return ClixValidity::SectionsInconsistent;
   if (h.metadataEnabled > 1) return ClixValidity::SectionsInconsistent;
   if (actualFileSize != h.selfSize) return ClixValidity::SizeMismatch;
 

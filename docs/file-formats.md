@@ -683,7 +683,7 @@ The first four reserved header bytes fingerprint the configured TZ rule. A chang
 rule invalidates timestamp ranks and bypasses the unchanged-file fast path; raw
 file timestamps and reading progress remain unchanged.
 Publication order uses full Unix seconds; unknown dates sort after dated items in
-newest-first order. Equal publication timestamps use title ordinal as a stable tie.
+newest-first order. Equal publication timestamps use Added ranks as a stable tie.
 The index adds two SD bytes per book, with no additional resident UI array.
 The builder reuses the arrival permutation allocation and temporarily allocates
 four bytes per book for publication keys (maximum 16 KiB for 4096 records).
@@ -783,3 +783,38 @@ Book moves rename the store and its `.deleted` journal (plus recovery sidecars)
 together. The stored source path is informational and is refreshed on the next
 save; the current file path selects the store. Local book deletion cleans up all
 of these sidecars but preserves the independent `My Clippings.txt` export.
+
+
+### Paperboy fold version 7 and touch history
+
+Header flag bit 3 adds a fourth u16 permutation, Touched, after publication order.
+The first eight reserved bytes now hold the TZ fingerprint and last indexed touch
+revision (u32 each). Older two/three-permutation files remain structurally readable
+for reconciliation; fold 7 rebuilds ranks while preserving firstSeen. The reader
+exposes only Touched, Added, Published, all descending. Touched ties/untouched rows
+use Added ranks. A touch-generation change defeats unchanged-file reuse, including
+counter gaps from an interrupted update.
+
+`/.crosspoint/library-touches/counter` and one 16-byte record per complete-path
+FNV fingerprint, sharded under two one-hex-digit subdirectories contain little-endian magic PCT1, sequence u32, last phone bump
+nonce u32, and an FNV checksum over the first 12 bytes (low u32). The counter
+reserves a monotonically increasing sequence before publishing the book record.
+Recent reads are seeded oldest to newest once. No book/article payload or reading
+position is stored in these records. The history uses no per-library RAM cache.
+
+Each write closes a checked `.tmp`, renames the prior record to `.bak`, then
+publishes the temp. Missing targets restore a valid temp, then backup, to the primary before reuse; invalid
+existing records fail rather than silently resetting history. A counter gap is
+safe. Nonzero phone nonces are idempotent and remain recorded through later opens.
+File moves carry history; deletion removes its small sidecars. Rename/removal and
+power failure semantics still depend on the SD card and filesystem; the checks
+cover logical interruption, short I/O and detected corruption, not arbitrary
+physical media failure. Exhausted u32 sequence space fails without wrapping.
+
+The builder reuses its order array. An extra fallible Added-rank array costs two
+bytes per book (maximum 8 KiB); timestamp keys remain four bytes per book and are
+released between permutations. Touched reads one fixed sidecar per indexed path, with two 16-way shard levels
+limiting repeated FAT directory scans;
+article metadata still uses the existing rebuild-scoped snapshot. The index gains
+two SD bytes per book. Counter/record I/O occurs only on open or explicit bump,
+not on every page turn.

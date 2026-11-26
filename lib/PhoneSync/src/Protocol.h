@@ -7,7 +7,7 @@
 // Wire format of the phone sync protocol (docs/paperboy-protocol.md). Pure: built for the device and the host tests.
 namespace phonesync::proto {
 
-inline constexpr uint8_t kVersion = 1;
+inline constexpr uint8_t kVersion = 2;
 inline constexpr size_t kIdBytes = 8;
 inline constexpr uint32_t kProgressStep = 4096;
 inline constexpr uint32_t kWindowBytes = 8192;
@@ -20,6 +20,8 @@ enum Type : uint8_t {
   PutData = 0x11,
   PutEnd = 0x12,
   Delete = 0x20,
+  Touch = 0x21,
+  TouchResult = 0xA1,
   Bye = 0x30,
   FirmwareBegin = 0x40,
   FirmwareData = 0x41,

@@ -62,10 +62,12 @@ jobs:
       - name: Run library index and format tests
         run: |
           cmake -S test -B /tmp/paperboy-tests
-          cmake --build /tmp/paperboy-tests --target LibraryIndexFileTest LibraryFormatTest LibraryBuilderTest -j2
+          cmake --build /tmp/paperboy-tests --target LibraryIndexFileTest LibraryFormatTest LibraryBuilderTest ClippingStoreTest ClippingStoreS3Test -j2
           /tmp/paperboy-tests/library_index_file/LibraryIndexFileTest
           /tmp/paperboy-tests/library_format/LibraryFormatTest
           /tmp/paperboy-tests/library_builder/LibraryBuilderTest
+          /tmp/paperboy-tests/clipping_store/ClippingStoreTest
+          /tmp/paperboy-tests/clipping_store/ClippingStoreS3Test
       - name: Pin nested PlatformIO core
         run: |
           pio pkg install -e gh_release

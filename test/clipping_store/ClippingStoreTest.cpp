@@ -1,5 +1,6 @@
 #include <ClippingStore.h>
 #include <HalStorage.h>
+#include <LibraryTouchStore.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -280,4 +281,44 @@ TEST(ClippingStore, MoveRefusesExistingDestinationHistoryAndDeleteCleansSidecars
   EXPECT_FALSE(Storage.exists((path + ".deleted").c_str()));
   EXPECT_FALSE(Storage.exists((path + ".bak").c_str()));
   EXPECT_FALSE(Storage.exists((path + ".tmp").c_str()));
+}
+
+TEST(ClippingStore, SharedBookMovePreservesTouchAndNonceAndRollsBackRenameFailure) {
+  for (const int failure : {-1, 0, 1, 2}) {
+    fake::reset();
+    fake::add("/source.epub");
+    ASSERT_TRUE(library::touches::initialize(nullptr, 0));
+    ASSERT_TRUE(library::touches::record("/source.epub", 123));
+    uint32_t before;
+    ASSERT_TRUE(library::touches::lookup("/source.epub", before));
+    fake::failRename = failure;
+    const bool moved = ClippingStore::moveBook("/source.epub", "/target.epub");
+    const char* current = moved ? "/target.epub" : "/source.epub";
+    const char* other = moved ? "/source.epub" : "/target.epub";
+    uint32_t after, missing;
+    EXPECT_TRUE(Storage.exists(current));
+    ASSERT_TRUE(library::touches::lookup(current, after));
+    EXPECT_EQ(after, before);
+    ASSERT_TRUE(library::touches::lookup(other, missing));
+    EXPECT_EQ(missing, 0u);
+    ASSERT_TRUE(library::touches::record(current, 123));
+    ASSERT_TRUE(library::touches::lookup(current, after));
+    EXPECT_EQ(after, before);
+  }
+}
+
+TEST(ClippingStore, SharedFolderMovePreservesTouchForNestedBooks) {
+  fake::reset();
+  fake::add("/books/nested/book.epub");
+  ASSERT_TRUE(library::touches::initialize(nullptr, 0));
+  ASSERT_TRUE(library::touches::record("/books/nested/book.epub", 456));
+  uint32_t before;
+  ASSERT_TRUE(library::touches::lookup("/books/nested/book.epub", before));
+  ASSERT_TRUE(ClippingStore::moveBook("/books", "/moved"));
+  uint32_t after;
+  ASSERT_TRUE(library::touches::lookup("/moved/nested/book.epub", after));
+  EXPECT_EQ(before, after);
+  ASSERT_TRUE(library::touches::record("/moved/nested/book.epub", 456));
+  ASSERT_TRUE(library::touches::lookup("/moved/nested/book.epub", after));
+  EXPECT_EQ(before, after);
 }

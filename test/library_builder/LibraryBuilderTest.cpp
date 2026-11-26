@@ -731,3 +731,54 @@ TEST_F(LibraryBuilderTest, TimezoneChangeInvalidatesAddedRanksAndDefeatsUnchange
     unsetenv("TZ");
   tzset();
 }
+
+TEST_F(LibraryBuilderTest, TouchChangesRebuildUnchangedBooksWithoutChangingAddedOrPublished) {
+  struct Context {
+    uint32_t a = 0;
+    uint32_t b = 0;
+  } state;
+  const auto times = +[](const void* raw, const char* path) -> BookTimes {
+    const auto& context = *static_cast<const Context*>(raw);
+    return std::strcmp(path, "/a.epub") == 0 ? BookTimes{200, 100, context.a} : BookTimes{100, 200, context.b};
+  };
+  EXPECT_TRUE(buildLibraryIndex("/", stats, true, times, &state));
+  LibraryIndexFile index;
+  EXPECT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::TouchedDesc, 0), "/a.epub");  // Untouched uses Added.
+  index.close();
+  state.b = 1;
+  BuildStats touched;
+  EXPECT_TRUE(buildLibraryIndex("/", touched, true, times, &state, 1));
+  EXPECT_TRUE(touched.indexReplaced);
+  EXPECT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::TouchedDesc, 0), "/b.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::RecentDesc, 0), "/a.epub");
+  EXPECT_EQ(pathAt(index, SortOrder::PublishedDesc, 0), "/b.epub");
+  index.close();
+  state.a = 2;
+  EXPECT_TRUE(buildLibraryIndex("/", touched, true, times, &state, 2));
+  EXPECT_TRUE(index.open(INDEX));
+  EXPECT_EQ(pathAt(index, SortOrder::TouchedDesc, 0), "/a.epub");
+}
+
+TEST_F(LibraryBuilderTest, TouchCounterGapsDoNotCauseAnEndlessRebuild) {
+  EXPECT_TRUE(buildLibraryIndex("/", stats, true, nullptr, nullptr, 99));
+  BuildStats unchanged;
+  EXPECT_TRUE(buildLibraryIndex("/", unchanged, true, nullptr, nullptr, 99));
+  EXPECT_FALSE(unchanged.indexReplaced);
+  BuildStats changed;
+  EXPECT_TRUE(buildLibraryIndex("/", changed, true, nullptr, nullptr, 100));
+  EXPECT_TRUE(changed.indexReplaced);
+}
+
+TEST_F(LibraryBuilderTest, TimestampLookupFailurePreservesThePreviousIndex) {
+  initial();
+  const auto original = fake::files[INDEX]->bytes;
+  const auto broken = +[](const void*, const char*) -> BookTimes {
+    BookTimes times;
+    times.valid = false;
+    return times;
+  };
+  EXPECT_FALSE(buildLibraryIndex("/", stats, true, broken));
+  EXPECT_EQ(fake::files[INDEX]->bytes, original);
+}

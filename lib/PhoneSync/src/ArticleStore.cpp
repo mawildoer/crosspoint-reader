@@ -1,6 +1,7 @@
 #include "ArticleStore.h"
 
 #include <HalStorage.h>
+#include <LibraryTouchStore.h>
 #include <Logging.h>
 #include <Memory.h>
 
@@ -259,6 +260,7 @@ bool append(const char* idHex, const uint32_t time, const char* source, const si
 bool remove(const char* idHex) {
   const std::string path = pathFor(idHex);
   if (Storage.exists(path.c_str()) && !Storage.remove(path.c_str())) return false;
+  library::touches::remove(path.c_str());
   if (!contains(idHex)) return true;
 
   // Copy every other line to a temp file, then move it over the index.

@@ -8,6 +8,7 @@
 #include <I18n.h>
 #include <LibraryBuilder.h>
 #include <LibraryText.h>
+#include <LibraryTouchStore.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <PhoneSync.h>
@@ -42,47 +43,42 @@ int bottomCornerClearance() {
 
 constexpr unsigned long LONG_PRESS_MS = 1000;
 
-constexpr int ADDED_TAB = 0;
-constexpr int PUBLISHED_TAB = 1;
-constexpr int TITLE_TAB = 2;
-constexpr int AUTHOR_TAB = 3;
-constexpr int TAB_SLOTS = AUTHOR_TAB + 1;
-
-constexpr bool isDescending(const library::SortOrder order) {
-  return order == library::SortOrder::PublishedDesc || order == library::SortOrder::RecentDesc ||
-         order == library::SortOrder::TitleDesc || order == library::SortOrder::AuthorDesc;
+constexpr int TOUCHED_TAB = 0;
+constexpr int ADDED_TAB = 1;
+constexpr int PUBLISHED_TAB = 2;
+constexpr int TAB_SLOTS = 3;
+constexpr bool isDescending(library::SortOrder order) {
+  return order == library::SortOrder::TouchedDesc || order == library::SortOrder::RecentDesc ||
+         order == library::SortOrder::PublishedDesc || order == library::SortOrder::TitleDesc ||
+         order == library::SortOrder::AuthorDesc;
 }
-
-constexpr bool isDateSort(const library::SortOrder order) {
-  return order == library::SortOrder::RecentAsc || order == library::SortOrder::RecentDesc ||
-         order == library::SortOrder::PublishedAsc || order == library::SortOrder::PublishedDesc;
+constexpr bool isDateSort(library::SortOrder order) {
+  return order == library::SortOrder::TouchedDesc || order == library::SortOrder::RecentDesc ||
+         order == library::SortOrder::RecentAsc || order == library::SortOrder::PublishedDesc ||
+         order == library::SortOrder::PublishedAsc;
 }
-
-constexpr bool isAuthorSort(const library::SortOrder order) {
+constexpr bool isAuthorSort(library::SortOrder order) {
   return order == library::SortOrder::AuthorAsc || order == library::SortOrder::AuthorDesc;
 }
-
-constexpr library::SortOrder orderForTab(const int tab, const uint8_t descendingTabs) {
-  const bool descending = (descendingTabs & (1u << tab)) != 0;
-  if (tab == PUBLISHED_TAB) return descending ? library::SortOrder::PublishedDesc : library::SortOrder::PublishedAsc;
-  if (tab == TITLE_TAB) return descending ? library::SortOrder::TitleDesc : library::SortOrder::TitleAsc;
-  if (tab == AUTHOR_TAB) return descending ? library::SortOrder::AuthorDesc : library::SortOrder::AuthorAsc;
-  return descending ? library::SortOrder::RecentDesc : library::SortOrder::RecentAsc;
+constexpr library::SortOrder orderForTab(const int tab) {
+  constexpr library::SortOrder ORDERS[] = {library::SortOrder::TouchedDesc, library::SortOrder::RecentDesc,
+                                           library::SortOrder::PublishedDesc};
+  return ORDERS[tab];
 }
-
 const char* tabLabelFor(const int tab) {
-  if (tab == PUBLISHED_TAB) return tr(STR_LIBRARY_TAB_PUBLISHED);
-  if (tab == TITLE_TAB) return tr(STR_LIBRARY_TAB_TITLE);
-  if (tab == AUTHOR_TAB) return tr(STR_LIBRARY_TAB_AUTHOR);
-  return tr(STR_LIBRARY_TAB_ADDED);
+  if (tab == TOUCHED_TAB) return tr(STR_LIBRARY_TAB_TOUCHED);
+  if (tab == ADDED_TAB) return tr(STR_LIBRARY_TAB_ADDED);
+  return tr(STR_LIBRARY_TAB_PUBLISHED);
 }
 
 library::BookTimes articleTimes(const void* context, const char* path) {
   char id[phonesync::store::kIdHexLen + 1];
-  if (!phonesync::store::idOfPath(path, id)) return {};
-  const auto* snapshot = static_cast<const phonesync::store::TimeSnapshot*>(context);
   library::BookTimes times;
-  snapshot->lookup(id, times.added, times.published);
+  times.valid = library::touches::lookup(path, times.touched);
+  if (phonesync::store::idOfPath(path, id)) {
+    const auto* snapshot = static_cast<const phonesync::store::TimeSnapshot*>(context);
+    snapshot->lookup(id, times.added, times.published);
+  }
   return times;
 }
 
@@ -113,8 +109,11 @@ void LibraryListActivity::onEnter() {
   // Rebuild when the index is missing, invalid, or was built with the other
   // metadata mode. Otherwise entering the screen stays instant.
   const bool readMetadata = SETTINGS.libraryUseMetadata != 0;
+  uint32_t touchRevision = 0;
+  const bool touchRevisionKnown = library::touches::revision(touchRevision);
   const bool rebuildNeeded = library::isLibraryIndexDirty() || !index.open(library::libraryIndexPath()) ||
-                             index.header().metadataEnabled != readMetadata;
+                             index.header().metadataEnabled != readMetadata ||
+                             (touchRevisionKnown && library::touchedRevision(index.header()) != touchRevision);
   if (rebuildNeeded) {
     index.close();
     GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
@@ -145,8 +144,11 @@ bool LibraryListActivity::rebuildIndex() {
     LOG_ERR("LIB", "article timestamp snapshot unavailable; retaining previous index");
     return false;
   }
+  uint32_t touchRevision = 0;
+  if (!library::touches::revision(touchRevision)) return false;
   library::BuildStats stats;
-  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0, articleTimes, &times);
+  const bool ok =
+      library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0, articleTimes, &times, touchRevision);
   if (!ok) {
     LOG_ERR("LIB", "index build failed");
     return false;
@@ -423,8 +425,8 @@ void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) 
   closeSwipeDelete();
 #endif
   if (index < 0 || index >= TAB_SLOTS) return;
-  if (toggleIfActive && index == activeTab()) descendingTabs ^= static_cast<uint8_t>(1u << index);
-  sortOrder = orderForTab(index, descendingTabs);
+  (void)toggleIfActive;
+  sortOrder = orderForTab(index);
   // The filter holds positions in the old order, so they
   // must be rebuilt.
   applyFilter();
@@ -436,8 +438,6 @@ void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) 
   nav.top = 0;
   requestUpdate();
 }
-
-void LibraryListActivity::toggleSortDirection() { selectTab(activeTab(), true); }
 
 int LibraryListActivity::tabCount() const { return TAB_SLOTS; }
 
@@ -711,7 +711,7 @@ bool LibraryListActivity::handleButtons() {
   // the freshly opened confirmation and select its default.
   if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, LONG_PRESS_MS)) {
     if (tabsFocused()) {
-      if (!degraded) toggleSortDirection();
+      stepTab(-1);
     } else if (isDateSort(sortOrder)) {
       showDateBookOptions(selectedEntry());
     } else if (deleteEligible()) {
@@ -1024,7 +1024,7 @@ void LibraryListActivity::drawHoldHelp() const {
   if (mappedInput.hasTouch() || groupsCollapsed) return;
   const char* help = nullptr;
   if (tabsFocused() && !degraded)
-    help = tr(STR_LIBRARY_HOLD_SORT);
+    help = tr(STR_LIBRARY_HOLD_PREVIOUS_VIEW);
   else if (!tabsFocused() && isDateSort(sortOrder) && listCount() > 0)
     help = tr(STR_LIBRARY_HOLD_OPTIONS);  // recent rows: hold opens the row menu
   else if (!tabsFocused() && deleteEligible() && listCount() > 0)
