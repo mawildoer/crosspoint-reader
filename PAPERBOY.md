@@ -188,6 +188,17 @@ settings migration/persistence checks passed. No new runtime allocation owns a
 full firmware image on the reader; final CRC verification uses a 128-byte buffer.
 The SD-stage/A/B strategy follows the human's requested design in this fork.
 
+Source `2956d36` passed branch and [release CI](https://github.com/mawildoer/crosspoint-reader/actions/runs/45919202303).
+The published [0.4.0 release](https://github.com/mawildoer/crosspoint-reader/releases/tag/paperboy-v0.4.0)
+is selected by the updater's latest-release API. Downloaded assets matched their
+SHA-256 sums; esptool validated the image checksum and hash. The 5,551,696-byte
+ESP32-C3 binary fits the OTA slot and contains the exact 18,432-byte logo, runtime
+`0.4.0-paperboy` marker and checkpoint metadata path. BUILD.txt matches the source
+commit. Binary SHA-256:
+`ed08ef8e9a9fe2e12792ba3c5ee49fdb4ef8b5f7748b6e6c7b014ef64cec5580`.
+The companion's actual download/cache code also verified this live release.
+TestFlight build 108.1 passed Apple processing and internal-test availability.
+
 ## Pairing
 
 Open the Library on the reader, then connect from Paperboy on the phone and accept the system pairing prompt. Use **Menu → Pair a new phone** when replacing the paired device. This action clears the reader's stored bonds, including when the Library is empty. If iOS reports a removed pairing, forget Paperboy X3 in iOS Bluetooth settings before pairing again.
