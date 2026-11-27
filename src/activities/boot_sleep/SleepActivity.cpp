@@ -30,7 +30,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/MoonIcon.h"
-#include "images/PaperboyLogo120.h"
+#include "images/PaperboyLogo.h"
 
 namespace {
 // Metalio: B/W sleep images use the full 0xF7 waveform instead of HALF (two
@@ -827,18 +827,36 @@ void SleepActivity::renderCustomSleepScreen() const {
 // the multi-flash GC waveform (0xF7) that FULL_REFRESH selects (#2471's blinking
 // complaint), except on Metalio.
 void SleepActivity::renderDefaultSleepScreen() const {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  int top, right, bottom, left;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  const int width = std::max(0, renderer.getScreenWidth() - left - right);
+  const int height = std::max(0, renderer.getScreenHeight() - top - bottom);
+  const int titleHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int sleepingHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  const int gap = std::max(8, sleepingHeight / 2);
+  const int logoSize = std::max(0, std::min(width * 2 / 3, height - titleHeight - sleepingHeight - gap));
+  const int logoX = left + (width - logoSize) / 2;
+  const int logoY = top + std::max(0, (height - logoSize - gap - titleHeight - sleepingHeight) / 2);
 
   renderer.clearScreen();
-  renderer.drawImage(PaperboyLogo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_PAPERBOY), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_SLEEPING));
-
-  // Make sleep screen dark unless light is selected in settings
-  if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT) {
-    renderer.invertScreen();
+  // drawImage blits unrotated physical bits. Logical pixels keep the mark upright with the text.
+  for (int y = 0; y < logoSize; ++y) {
+    const int sourceY = y * PAPERBOY_LOGO_SIZE / logoSize;
+    for (int x = 0; x < logoSize; ++x) {
+      const int sourceX = x * PAPERBOY_LOGO_SIZE / logoSize;
+      const int bit = sourceY * PAPERBOY_LOGO_SIZE + sourceX;
+      if ((PaperboyLogo[bit / 8] & (0x80 >> (bit % 8))) == 0) {
+        renderer.drawPixel(logoX + x, logoY + y, true);
+      }
+    }
   }
+  const int center = left + width / 2;
+  const int titleY = logoY + logoSize + gap;
+  renderer.drawText(UI_10_FONT_ID,
+                    center - renderer.getTextWidth(UI_10_FONT_ID, tr(STR_PAPERBOY), EpdFontFamily::BOLD) / 2, titleY,
+                    tr(STR_PAPERBOY), true, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, center - renderer.getTextWidth(SMALL_FONT_ID, tr(STR_SLEEPING)) / 2,
+                    titleY + titleHeight, tr(STR_SLEEPING));
 
   renderer.displayBuffer(kSleepClean);
 }

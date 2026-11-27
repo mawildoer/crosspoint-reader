@@ -11,7 +11,7 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   // value so a reordered menu or enum cannot silently swap their behavior.
   static constexpr auto SLEEP_SCREEN_VALUES = [] {
     std::array<StrId, CrossPointSettings::SLEEP_SCREEN_MODE_COUNT> values{};
-    values[CrossPointSettings::DARK] = StrId::STR_DARK;
+    values[CrossPointSettings::DARK] = StrId::STR_PAPERBOY;
     values[CrossPointSettings::LIGHT] = StrId::STR_LIGHT;
     values[CrossPointSettings::CUSTOM] = StrId::STR_CUSTOM;
     values[CrossPointSettings::COVER] = StrId::STR_COVER;

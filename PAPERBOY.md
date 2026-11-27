@@ -6,7 +6,7 @@ The phone fetches content using its own subscriptions and sends EPUB files over 
 
 ## Added behavior
 
-- The default sleep screen uses the Paperboy artwork and wordmark. Custom and cover sleep-screen modes retain their selected behavior.
+- The default sleep screen uses an upright Paperboy mark, about two-thirds of the viewable screen width, with dark artwork and text directly on white. The former Dark setting is called Paperboy; Light remains a compatible alias. Custom and cover sleep-screen modes retain their selected behavior.
 - Home opens the unified Library. Books and articles share its Touched, Added and Published views (all newest first); articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
 - Firmware can be updated from the phone over the bonded Bluetooth link after one USB bootstrap installation. The reader stages and validates the image on SD, requires USB power or at least 30% battery, writes the inactive OTA slot, and restarts in Library for version verification.
 - A phone Bump command changes only an article’s Touched position. Opening books and articles also updates Touched, without changing arrival/publication dates or progress.
@@ -107,6 +107,37 @@ default mode to see Paperboy; custom/cover modes should retain their selection.
 Check repeated reader/Library transitions for leaks, more than 50 KiB free C3
 heap, the largest free block, and acceptable rebuild latency. These are pending
 human hardware checks for this release; host results do not establish them.
+
+### Paperboy 0.3.1: light sleep artwork
+
+The human requested an upright mark around two-thirds of the screen width, then
+a light background with only artwork and text dark. The built-in screen now
+draws a 384-pixel source in logical coordinates through the renderer, removing
+the physical-blit rotation error. It scales to two-thirds of the viewable width,
+shrinking only when needed to leave room for both text lines. The generator
+removes the icon's dark matte and makes a dark outline and details on white.
+Legacy mode IDs remain unchanged: former Dark is labeled Paperboy, and Light is
+a compatible alias. Other sleep modes retain their selection and routing.
+
+The 18,432-byte asset is immutable flash data (ELF symbol type `r`), replacing the
+1,800-byte version. No bitmap buffer or persistent state is allocated. Static
+RAM remains 64,760 bytes for `default` and 64,736 bytes for `gh_release`.
+Both final targets passed; the release uses 5,534,633 bytes of its 6,553,600-byte
+flash budget. Formatting and whitespace checks passed. A host diagnostic ran
+the actual default-screen body with the actual coordinate/dimension/inset code
+for 12 panel/orientation cases; white corners and text bounds passed. The preview
+uses a substitute host font. Asset generation is deterministic. Four independent
+read-only reviews found no correctness, architecture, embedded, or i18n/docs
+issues. SDK revision remains `3f3e4c1`.
+
+Hardware check after Bluetooth installation: confirm `0.3.1-paperboy`, then sleep
+from Library and from each reader orientation. The built-in sleep screen retains
+its normal portrait presentation: its P must be upright relative to the labels,
+approximately two-thirds of the width, on white without a rectangular matte.
+Check the Paperboy and Light selections, wake without retained artwork, and
+confirm a selected cover/custom/quick-resume screen still behaves normally.
+Physical panel appearance remains a human check; host rendering is not a pass
+for ghosting or refresh quality.
 
 ## Pairing
 

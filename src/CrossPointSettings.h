@@ -20,7 +20,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
  public:
   enum SLEEP_SCREEN_MODE {
-    DARK = 0,
+    DARK = 0,  // Legacy saved value: Paperboy's light sleep screen.
     LIGHT = 1,
     CUSTOM = 2,
     COVER = 3,
