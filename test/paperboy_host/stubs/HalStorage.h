@@ -7,6 +7,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 inline std::map<std::string, std::string> files;
 inline bool shortWrite = false;
@@ -28,6 +29,16 @@ class HalFile {
   }
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
+  HalFile(HalFile&& other) noexcept { *this = std::move(other); }
+  HalFile& operator=(HalFile&& other) noexcept {
+    if (this == &other) return *this;
+    close();
+    path = std::move(other.path);
+    at = other.at;
+    valid = other.valid;
+    other.valid = false;
+    return *this;
+  }
   ~HalFile() { close(); }
   explicit operator bool() const { return valid; }
   int read(void* dst, size_t n) {

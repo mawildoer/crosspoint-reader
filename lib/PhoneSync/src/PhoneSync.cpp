@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "ArticleStore.h"
+#include "FirmwareStage.h"
 #include "FirmwareTransferState.h"
 #include "Protocol.h"
 #include "freertos/FreeRTOS.h"
@@ -39,7 +40,7 @@ constexpr char kDeviceName[] = "Paperboy X3";
 // the SD card). Sized for the flow-control window plus the per-frame header at the smallest MTU.
 constexpr size_t kQueueBytes = 12288;
 constexpr size_t kMaxFrame = 512;
-constexpr char kFirmwarePath[] = "/.crosspoint/paperboy-firmware.bin";
+constexpr const char* kFirmwarePath = firmware_stage::kImagePath;
 constexpr uint32_t kMaxFirmwareBytes = 0x640000;
 enum class TransferKind : uint8_t { Article, Firmware };
 FirmwareTransferState firmwareTransfer;
@@ -93,6 +94,7 @@ struct Incoming {
   uint32_t acked = 0;
   uint32_t time = 0;
   bool failed = false;
+  bool resumable = false;
   std::string source;
   std::string title;
   std::string author;
@@ -125,10 +127,16 @@ void sendProgress() {
 
 void abandonIncoming() {
   if (!incoming.active) return;
-  incoming.file.close();
+  const bool closed = incoming.file.close();
   incoming.active = false;
   if (incoming.kind == TransferKind::Firmware) firmwareTransfer.clear();
-  Storage.remove(incoming.kind == TransferKind::Firmware ? kFirmwarePath : store::kIncomingPath);
+  if (incoming.kind == TransferKind::Firmware && incoming.resumable && closed && !incoming.failed &&
+      !firmware_stage::checkpoint(incoming.received, incoming.crc)) {
+    LOG_ERR("SYNC", "firmware checkpoint failed; keeping the prior checkpoint");
+  }
+  if (incoming.kind != TransferKind::Firmware || !incoming.resumable) {
+    Storage.remove(incoming.kind == TransferKind::Firmware ? kFirmwarePath : store::kIncomingPath);
+  }
 }
 
 // Counting free clusters took 5.9 s on a 16 GB card (X3, 15/11/2026), and it froze the buttons and
@@ -163,7 +171,8 @@ void onHello(const uint8_t* payload, const size_t len) {
     phoneTimeAtMs = nowMs();
   }
   if (len < 1 || payload[0] != kVersion) LOG_INF("SYNC", "phone speaks protocol %u", len ? payload[0] : 0);
-  uint8_t frame[64] = {HelloAck, static_cast<uint8_t>(len >= 1 && payload[0] >= 2 ? kVersion : 1)};
+  uint8_t frame[64] = {HelloAck,
+                       static_cast<uint8_t>(len >= 1 && payload[0] >= 1 ? std::min<uint8_t>(payload[0], kVersion) : 1)};
   frame[2] = host.batteryPercent ? host.batteryPercent() : 0;
   writeU32(frame + 3, knownFreeMb());
   const char* version = host.firmwareVersion ? host.firmwareVersion : "";
@@ -236,6 +245,7 @@ void onPutBegin(const uint8_t* payload, const size_t len) {
     return;
   }
   incoming.kind = TransferKind::Article;
+  incoming.resumable = false;
   incoming.active = true;
   incoming.failed = false;
   incoming.size = fields.size;
@@ -305,45 +315,87 @@ void onPutEnd() {
   sendStatus(PutResult, status);
 }
 
-void clearFirmwareStage() {
+void clearFirmwareStage(bool discard = true) {
   firmwareTransfer.clear();
-  Storage.remove(kFirmwarePath);
+  if (discard || !firmware_stage::hasIdentity()) firmware_stage::discard();
 }
 
-void onFirmwareBegin(const uint8_t* payload, const size_t len) {
-  if (!firmwareAuthorized.load() || !host.validateFirmware || !host.installFirmware || len != 8) {
-    sendStatus(FirmwareReady, BadRequest);
+void sendFirmwareCheckpoint(uint8_t type, uint8_t status, uint32_t offset = 0, uint32_t crc = 0) {
+  uint8_t frame[10] = {type, status};
+  writeU32(frame + 2, offset);
+  writeU32(frame + 6, crc);
+  send(frame, sizeof(frame));
+}
+
+void sendFirmwareReady(bool resumable, uint8_t status, uint32_t offset = 0, uint32_t crc = 0) {
+  if (!resumable) return sendStatus(FirmwareReady, status);
+  sendFirmwareCheckpoint(FirmwareResumeReady, status, offset, crc);
+}
+
+void onFirmwareBegin(const uint8_t* payload, const size_t len, const bool resumable = false) {
+  if (!firmwareAuthorized.load() || !host.validateFirmware || !host.installFirmware || len != (resumable ? 40 : 8)) {
+    sendFirmwareReady(resumable, BadRequest);
     return;
   }
   if (incoming.active || firmwareTransfer.committed()) {
-    sendStatus(FirmwareReady, Busy);
+    sendFirmwareReady(resumable, Busy);
     return;
   }
   if (!host.canUpdateFirmware || !host.canUpdateFirmware()) {
-    sendStatus(FirmwareReady, LowBattery);
+    sendFirmwareReady(resumable, LowBattery);
     return;
   }
   const uint32_t size = readU32(payload);
   if (size < 256 || size > kMaxFirmwareBytes) {
-    sendStatus(FirmwareReady, BadRequest);
+    sendFirmwareReady(resumable, BadRequest);
     return;
   }
-  clearFirmwareStage();
-  incoming.file = Storage.open(kFirmwarePath, O_WRONLY | O_CREAT | O_TRUNC);
+  uint32_t offset = 0, prefixCrc = 0;
+  if (resumable) {
+    firmware_stage::Identity identity{size, readU32(payload + 4), {}};
+    memcpy(identity.sha256, payload + 8, sizeof(identity.sha256));
+    if (!firmware_stage::prepare(identity, offset, prefixCrc)) {
+      sendFirmwareReady(true, StorageError);
+      return;
+    }
+  } else {
+    clearFirmwareStage();
+  }
+  incoming.file = Storage.open(kFirmwarePath, O_WRONLY | O_CREAT | (resumable ? O_APPEND : O_TRUNC));
   if (!incoming.file) {
-    sendStatus(FirmwareReady, StorageError);
+    sendFirmwareReady(resumable, StorageError);
     return;
   }
   incoming.kind = TransferKind::Firmware;
+  incoming.resumable = resumable;
   firmwareTransfer.begin();
   incoming.active = true;
   incoming.failed = false;
   incoming.size = size;
   incoming.expectedCrc = readU32(payload + 4);
-  incoming.crc = incoming.received = incoming.acked = 0;
+  incoming.crc = prefixCrc;
+  incoming.received = incoming.acked = offset;
   byeAtMs = 0;
   LOG_INF("SYNC", "firmware receiving %lu bytes", static_cast<unsigned long>(size));
-  sendStatus(FirmwareReady, Ok);
+  sendFirmwareReady(resumable, Ok, offset, prefixCrc);
+}
+
+void onFirmwarePause() {
+  if (!firmwareAuthorized.load() || incoming.kind != TransferKind::Firmware || !incoming.resumable ||
+      !firmwareTransfer.pause()) {
+    sendFirmwareCheckpoint(FirmwarePaused, BadRequest);
+    return;
+  }
+  bool saved = true;
+  if (incoming.active) {
+    saved = incoming.file.close() && !incoming.failed;
+    incoming.active = false;
+    if (saved) saved = firmware_stage::checkpoint(incoming.received, incoming.crc);
+  }
+  byeAtMs = nowMs() | 1u;
+  freeSpaceStale = true;
+  sendFirmwareCheckpoint(FirmwarePaused, saved ? Ok : StorageError, saved ? incoming.received : 0,
+                         saved ? incoming.crc : 0);
 }
 
 void onFirmwareEnd() {
@@ -351,17 +403,24 @@ void onFirmwareEnd() {
     sendStatus(FirmwareStaged, BadRequest);
     return;
   }
-  incoming.file.close();
+  const bool closed = incoming.file.close();
   incoming.active = false;
   uint8_t result = Ok;
-  if (incoming.failed)
+  if (!closed || incoming.failed)
     result = StorageError;
   else if (incoming.received != incoming.size || incoming.crc != incoming.expectedCrc)
+    result = ChecksumMismatch;
+  else if (incoming.resumable && !firmware_stage::checkpoint(incoming.received, incoming.crc))
+    result = StorageError;
+  else if (!firmware_stage::verify(incoming.size, incoming.expectedCrc, [] {
+             esp_task_wdt_reset();
+             vTaskDelay(1);
+           }))
     result = ChecksumMismatch;
   else if (!host.validateFirmware(kFirmwarePath))
     result = InvalidImage;
   firmwareTransfer.validate(result == Ok);
-  if (!firmwareTransfer.validated()) Storage.remove(kFirmwarePath);
+  if (!firmwareTransfer.validated() && !(incoming.resumable && result == StorageError)) firmware_stage::discard();
   LOG_INF("SYNC", "firmware staged: status %u, %lu bytes", result, static_cast<unsigned long>(incoming.received));
   sendStatus(FirmwareStaged, result);
 }
@@ -444,6 +503,12 @@ void handleFrame(const uint8_t* frame, const size_t len) {
       break;
     case FirmwareBegin:
       onFirmwareBegin(payload, payloadLen);
+      break;
+    case FirmwareResume:
+      onFirmwareBegin(payload, payloadLen, true);
+      break;
+    case FirmwarePause:
+      if (payloadLen == 0) onFirmwarePause();
       break;
     case FirmwareData:
       if (incoming.kind == TransferKind::Firmware && firmwareAuthorized.load()) onPutData(payload, payloadLen);
@@ -587,7 +652,7 @@ bool startRadio() {
 
 void stopRadio() {
   abandonIncoming();
-  if (firmwareTransfer.busy()) clearFirmwareStage();
+  if (firmwareTransfer.busy()) clearFirmwareStage(false);
   if (!radioOn) return;
   NimBLEDevice::deinit(true);
   txChar = nullptr;
@@ -608,7 +673,7 @@ bool pump() {
   if (!radioOn) return false;
   if (linkDropped.exchange(false)) {
     abandonIncoming();
-    if (!firmwareTransfer.committed()) clearFirmwareStage();
+    if (!firmwareTransfer.committed()) clearFirmwareStage(false);
     // A phone that said BYE and left has finished: byeAtMs stays, and the radio stops.
     if (queue && byeAtMs == 0) xMessageBufferReset(queue);
   }
@@ -656,7 +721,7 @@ void tick(const Where where, const bool storageBusy, const bool wifiOn) {
   pump();
   if (!firmwareTransfer.committed() && nowMs() - lastFrameMs > 30000) {
     if (incoming.active && incoming.kind == TransferKind::Firmware) abandonIncoming();
-    if (firmwareTransfer.busy()) clearFirmwareStage();
+    if (firmwareTransfer.busy()) clearFirmwareStage(false);
   }
   if (installPendingFirmware()) {
     stopRadio();

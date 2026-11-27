@@ -9,6 +9,7 @@ The phone fetches content using its own subscriptions and sends EPUB files over 
 - The default sleep screen uses an upright Paperboy mark, about two-thirds of the viewable screen width, with dark artwork and text directly on white. The former Dark setting is called Paperboy; Light remains a compatible alias. Custom and cover sleep-screen modes retain their selected behavior.
 - Home opens the unified Library. Books and articles share its Touched, Added and Published views (all newest first); articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
 - Firmware can be updated from the phone over the bonded Bluetooth link after one USB bootstrap installation. The reader stages and validates the image on SD, requires USB power or at least 30% battery, writes the inactive OTA slot, and restarts in Library for version verification.
+- Protocol 3 retains firmware checkpoints on SD between sync windows. A matching image continues from its saved prefix; a different release starts a new stage. The full actual file is checked before flashing, and article sync/reading remain available between windows.
 - A phone Bump command changes only an article’s Touched position. Opening books and articles also updates Touched, without changing arrival/publication dates or progress.
 - Phone sync runs in the Library and briefly before sleep. The list refreshes after article transfers settle. It stops while reading to release RAM.
 - Articles use the normal reading-position files and recent-books list. Opening an article does not mark it finished. Completion requires the final page of a fully generated final section or the end-of-book screen.
@@ -138,6 +139,54 @@ Check the Paperboy and Light selections, wake without retained artwork, and
 confirm a selected cover/custom/quick-resume screen still behaves normally.
 Physical panel appearance remains a human check; host rendering is not a pass
 for ghosting or refresh quality.
+
+### Paperboy 0.4.0: firmware checkpoints
+
+The phone can prepare updates after article sync, stage a bounded part in a short
+window, and resume it at the next connection. The current image keeps running
+until a longer window verifies the whole actual SD file, writes the inactive
+slot, and reboots. The paired phone confirms the changed version. Old phones
+still negotiate protocol 1 or 2 and use the existing whole-transfer path.
+
+The reader owns one staging image and a checked 56-byte identity/checkpoint plus
+temp/backup records under `/.crosspoint`. The image identity includes its size,
+whole CRC32 and SHA-256. Data closes before a checkpoint is published. Resume
+reads the bounded checkpoint and truncates any uncheckpointed tail; it does not
+rescan the growing file every window. The phone checks the prefix CRC when
+resuming and pausing. End streams the complete SD file through a 128-byte buffer
+before the existing board/image validation and A/B installation. No whole-image
+MCU allocation or resident history cache is added. Files and state transitions
+belong to the main-loop PhoneSync receiver through `HalStorage`.
+
+Main-agent host checks cover checkpoint continuation, different identities,
+uncheckpointed tails, short writes, interrupted metadata publication/recovery,
+read errors and actual-file CRC corruption. Companion tests cover repeated short
+windows, simulated reader restarts, sending only remaining bytes, full staging
+without premature commit, bad prefixes/offsets, expiration and confirmation-record
+write failures. Protocol 3 phones retain basic sync with protocol 1/2 readers.
+
+Human hardware checks: install this firmware once over Bluetooth in a complete
+window (older firmware cannot resume its own capability upgrade). On a subsequent
+different-image update, interrupt after some bytes, reconnect in Library, and
+confirm progress continues above zero while articles and partial reading positions
+remain available. Repeat across reader sleep/reboot and leaving Library. Turn
+automatic updates off during staging, then on again; the prefix should remain.
+A different image must start a fresh stage. A fully staged image must not reboot
+until validation/commit in a long window. Confirm the expected changed version
+after reboot and check repeated interruptions for stable C3 heap/largest block
+and responsive controls. These physical checks remain pending.
+
+Final `default` and `gh_release` builds passed after review fixes. Static RAM is
+unchanged at 64,760 and 64,736 bytes respectively; release flash use is 5,537,491
+of 6,553,600 bytes (84.5%). The SDK stays at `3f3e4c1`. Four independent reviews
+and one targeted follow-up covered the reader/app contract; all verified findings
+were resolved. Real frame-handler host checks now exercise final checkpoint short
+writes/rename failures, validated pause followed by actual article upload, and a
+declined low-battery commit followed by resume and accepted commit. 170 companion
+Swift tests, Release app/extension and Mac CLI builds, share registration, and
+settings migration/persistence checks passed. No new runtime allocation owns a
+full firmware image on the reader; final CRC verification uses a 128-byte buffer.
+The SD-stage/A/B strategy follows the human's requested design in this fork.
 
 ## Pairing
 

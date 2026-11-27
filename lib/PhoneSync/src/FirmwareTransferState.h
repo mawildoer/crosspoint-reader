@@ -16,6 +16,11 @@ class FirmwareTransferState {
   }
   bool installDue(uint32_t now) const { return committed() && static_cast<uint32_t>(now - committedAt) >= 400; }
   void clear() { stage = Stage::Idle; }
+  bool pause() {
+    if (stage != Stage::Receiving && stage != Stage::Validated) return false;
+    stage = Stage::Idle;
+    return true;
+  }
 
  private:
   Stage stage = Stage::Idle;
