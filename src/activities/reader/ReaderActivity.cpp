@@ -6,6 +6,7 @@
 #include <KOReaderDocumentId.h>
 #include <LibraryTouchStore.h>
 #include <Memory.h>
+#include <PhoneSync.h>
 #include <TrustedTime.h>
 
 #include <algorithm>
@@ -90,7 +91,8 @@ void ReaderActivity::rememberBookOnceRendered() {
   bookRemembered = true;
   APP_STATE.openEpubPath = bookPath;
   APP_STATE.saveToFile();
-  if (!library::touches::record(bookPath.c_str())) LOG_ERR("READER", "could not record library touch");
+  if (!library::touches::record(bookPath.c_str(), 0, phonesync::libraryTime()))
+    LOG_ERR("READER", "could not record library touch");
   RECENT_BOOKS.addBook(bookPath, getBookTitle(), getBookAuthor(), getBookThumbBmpPath());
   const pluginevents::Var openVars[] = {{"book", bookPath.c_str()}};
   pluginevents::emit(pluginevents::Event::ReaderOpen, openVars, 1);

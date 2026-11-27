@@ -7,10 +7,10 @@ The phone fetches content using its own subscriptions and sends EPUB files over 
 ## Added behavior
 
 - The default sleep screen uses an upright Paperboy mark, about two-thirds of the viewable screen width, with dark artwork and text directly on white. The former Dark setting is called Paperboy; Light remains a compatible alias. Custom and cover sleep-screen modes retain their selected behavior.
-- Home opens the unified Library. Books and articles share its Touched, Added and Published views (all newest first); articles have a paper icon, author/source subtitle and publication-date value. There is no separate Articles destination.
+- Home opens the unified Library. Books and articles share its Touched, Added and Published views (all newest first); articles have a paper icon, author/source subtitle and the last touch time in Touched or publication date in the other views. There is no separate Articles destination.
 - Firmware can be updated from the phone over the bonded Bluetooth link after one USB bootstrap installation. The reader stages and validates the image on SD, requires USB power or at least 30% battery, writes the inactive OTA slot, and restarts in Library for version verification.
 - Protocol 3 retains firmware checkpoints on SD between sync windows. A matching image continues from its saved prefix; a different release starts a new stage. The full actual file is checked before flashing, and article sync/reading remain available between windows.
-- A phone Bump command changes only an article’s Touched position. Opening books and articles also updates Touched, without changing arrival/publication dates or progress.
+- A phone Bump command moves the article to the top of Touched and records when the reader applied it. Opening books and articles also updates Touched, without changing arrival/publication dates or progress.
 - Phone sync runs in the Library and briefly before sleep. The list refreshes after article transfers settle. It stops while reading to release RAM.
 - Articles use the normal reading-position files and recent-books list. Opening an article does not mark it finished. Completion requires the final page of a fully generated final section or the end-of-book screen.
 - X3 stays awake while USB power is detected and starts a fresh idle timeout after unplugging. A USB-powered cold boot continues into the reader. The power button still permits manual sleep.
@@ -60,14 +60,14 @@ Added, Published, and reading progress are unchanged. Untouched documents and
 ties follow Added order. The phone queues bumps until this protocol-2 firmware
 is installed; protocol-1 phones can still sync articles.
 
-The reader owns touch history in checked 16-byte records under
+The reader owns touch history in checked records (16 bytes in 0.3.0, 20 bytes with a touch timestamp from 0.4.1) under
 `/.crosspoint/library-touches`, sharded by path hash. A persistent counter gives
 local opens and phone bumps one ordering without relying on a reader clock.
 Records follow shared rename/move transactions and are removed with their
 document. The index stores a Touched permutation; rebuilding needs a checked
 two-byte Added rank per book and reuses four-byte timestamp scratch for each
 date order. At 4,096 books these arrays total 24 KiB, released after rebuilding.
-There is no resident touch-history cache. This adds small SD writes when opening
+Only the current window of article rows caches touch times while the Library is open. This adds small SD writes when opening
 documents and an SD read per document during rebuilds; physical SD latency and
 heap behavior still require hardware checks.
 

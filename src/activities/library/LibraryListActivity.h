@@ -168,7 +168,13 @@ class LibraryListActivity final : public UiTabListActivity {
   std::vector<std::string> winAuthors;
   std::vector<std::string> winDetails;
   std::vector<std::string> winDates;
-  std::vector<phonesync::store::Entry> winArticleMetadata;
+  struct VisibleArticle {
+    phonesync::store::Entry metadata{};
+    uint32_t touchedAt = 0;
+    bool touchLoaded = false;
+    bool hasMetadata = false;
+  };
+  std::vector<VisibleArticle> winArticleMetadata;
   LibraryRefresh articleRefresh;
   uint16_t articleFolder = 0xFFFF;
   std::vector<std::string> winHeaders;

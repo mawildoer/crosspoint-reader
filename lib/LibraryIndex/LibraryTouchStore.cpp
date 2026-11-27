@@ -14,18 +14,20 @@ namespace library::touches {
 namespace {
 constexpr char ROOT[] = "/.crosspoint/library-touches";
 constexpr char COUNTER[] = "/.crosspoint/library-touches/counter";
-constexpr uint32_t MAGIC = 0x31544350;  // PCT1
+constexpr uint32_t LEGACY_MAGIC = 0x31544350;  // PCT1
+constexpr uint32_t MAGIC = 0x32544350;         // PCT2
 struct Record {
   uint32_t magic;
   uint32_t sequence;
   uint32_t nonce;
+  uint32_t timestamp;
   uint32_t check;
 };
-static_assert(sizeof(Record) == 16);
+static_assert(sizeof(Record) == 20);
 enum class Read { Missing, Ok, Error };
 
-uint32_t checksum(const Record& r) {
-  return static_cast<uint32_t>(clixPathHash(reinterpret_cast<const char*>(&r), 12));
+uint32_t checksum(const Record& r, size_t bytes = offsetof(Record, check)) {
+  return static_cast<uint32_t>(clixPathHash(reinterpret_cast<const char*>(&r), bytes));
 }
 void pathFor(const char* book, char (&path)[96]) {
   char hex[17];
@@ -35,10 +37,17 @@ void pathFor(const char* book, char (&path)[96]) {
 Read readOne(const char* path, Record& out) {
   HalFile file = Storage.open(path);
   if (!file) return Storage.exists(path) ? Read::Error : Read::Missing;
-  if (file.size() != sizeof(out) || file.read(&out, sizeof(out)) != sizeof(out) || out.magic != MAGIC ||
-      out.check != checksum(out))
+  const auto size = file.size();
+  constexpr size_t legacySize = 16;
+  if ((size != legacySize && size != sizeof(out)) || file.read(&out, size) != static_cast<int>(size))
     return Read::Error;
-  return Read::Ok;
+  if (size == legacySize) {
+    // The last word in PCT1 was the checksum. It carried no wall-clock time.
+    if (out.magic != LEGACY_MAGIC || out.timestamp != checksum(out, 12)) return Read::Error;
+    out.timestamp = 0;
+    return Read::Ok;
+  }
+  return out.magic == MAGIC && out.check == checksum(out) ? Read::Ok : Read::Error;
 }
 Read read(const char* path, Record& out) {
   const auto result = readOne(path, out);
@@ -89,9 +98,9 @@ bool initialize(const char* const* newestFirst, size_t count) {
     if (!Storage.exists(newestFirst[i - 1])) continue;
     char path[96];
     pathFor(newestFirst[i - 1], path);
-    if (!write(path, {MAGIC, ++counter.sequence, 0, 0})) return false;
+    if (!write(path, {MAGIC, ++counter.sequence, 0, 0, 0})) return false;
   }
-  return write(COUNTER, {MAGIC, counter.sequence, 0, 0});
+  return write(COUNTER, {MAGIC, counter.sequence, 0, 0, 0});
 }
 
 bool revision(uint32_t& sequence) {
@@ -117,7 +126,17 @@ bool lookup(const char* book, uint32_t& sequence) {
   return false;
 }
 
-bool record(const char* book, const uint32_t nonce) {
+bool readTimestamp(const char* book, uint32_t& timestamp) {
+  char path[96];
+  pathFor(book, path);
+  Record value{};
+  // Rendering only reads the published record. Index reconciliation owns recovery.
+  const auto result = readOne(path, value);
+  timestamp = result == Read::Ok ? value.timestamp : 0;
+  return result != Read::Error;
+}
+
+bool record(const char* book, const uint32_t nonce, const uint32_t timestamp) {
   if (!Storage.exists(book)) return false;
   Record counter{}, previous{};
   if (read(COUNTER, counter) != Read::Ok || counter.sequence == std::numeric_limits<uint32_t>::max()) return false;
@@ -130,8 +149,8 @@ bool record(const char* book, const uint32_t nonce) {
   }
   ++counter.sequence;
   // Reserve the sequence before publishing the book: interruption can leave a gap, never reuse it.
-  if (!write(COUNTER, {MAGIC, counter.sequence, 0, 0}) ||
-      !write(path, {MAGIC, counter.sequence, nonce == 0 ? previous.nonce : nonce, 0}))
+  if (!write(COUNTER, {MAGIC, counter.sequence, 0, 0, 0}) ||
+      !write(path, {MAGIC, counter.sequence, nonce == 0 ? previous.nonce : nonce, timestamp, 0}))
     return false;
   markLibraryIndexDirty();
   return true;
@@ -156,7 +175,8 @@ bool move(const char* oldBook, const char* newBook) {
   if (found == Read::Error) return false;
   const auto destination = read(newPath, target);
   if (destination == Read::Error ||
-      (destination == Read::Ok && (target.sequence != value.sequence || target.nonce != value.nonce)))
+      (destination == Read::Ok &&
+       (target.sequence != value.sequence || target.nonce != value.nonce || target.timestamp != value.timestamp)))
     return false;
   if (destination == Read::Missing && !write(newPath, value)) return false;
   remove(oldBook);

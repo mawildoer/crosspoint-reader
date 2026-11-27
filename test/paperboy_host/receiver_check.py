@@ -43,10 +43,22 @@ bool powerAllowed = true, freeSpaceStale = false;
 uint32_t phoneTime = 0, phoneTimeAtMs = 0, generation = 0, byeAtMs = 0;
 uint16_t receivedThisBoot = 0;
 std::atomic<uint32_t> droppedFrames{0};
+constexpr uint32_t MIN_LIBRARY_EPOCH = 1735689600;
+uint32_t ticks = 100;
+uint32_t rtcSeconds() { return ticks; }
+int64_t wall = 0;
+#define time(unused) wall
+enum { ESP_RST_POWERON, ESP_RST_SW, ESP_RST_DEEPSLEEP };
+int resetReason = ESP_RST_POWERON;
+int esp_reset_reason() { return resetReason; }
+uint32_t knownFreeMb() { return 0; }
+bool begun = false;
 uint32_t nowMs() { return 100; }
 void esp_task_wdt_reset() {}
 void vTaskDelay(int) {}
 struct Host {
+  const char* firmwareVersion = "test";
+  uint8_t (*batteryPercent)() = nullptr;
   bool (*canUpdateFirmware)() = [] { return powerAllowed; };
   bool (*validateFirmware)(const char*) = [](const char*) { return true; };
   bool (*installFirmware)(const char*) = [](const char*) { return true; };
@@ -54,11 +66,11 @@ struct Host {
 std::vector<std::vector<uint8_t>> replies;
 void send(const uint8_t* bytes, size_t count) { replies.emplace_back(bytes, bytes + count); }
 void sendStatus(uint8_t type, uint8_t status) { const uint8_t bytes[]{type,status}; send(bytes,2); }
-void onHello(const uint8_t*,size_t) {}
+
 void onList() {}
 void onDelete(const uint8_t*,size_t) {}
 '''
-functions = ["void sendProgress()", "void abandonIncoming()", "void onPutBegin(", "void onPutData(",
+functions = ["uint32_t libraryEpoch(", "uint32_t libraryTime()", "void begin(const Host&", "void onHello(", "void sendProgress()", "void abandonIncoming()", "void onPutBegin(", "void onPutData(",
              "void onPutEnd()", "void clearFirmwareStage(", "void sendFirmwareCheckpoint(",
              "void sendFirmwareReady(", "void onFirmwareBegin(", "void onFirmwarePause()",
              "void onFirmwareEnd()", "void onFirmwareCommit()", "void handleFrame("]
@@ -79,6 +91,37 @@ void article(uint8_t id) {
   char hex[17]; idToHex(begin.data(),hex); assert(files[store::pathFor(hex)]==text);
 }
 int main() {
+  begin(host);
+  assert(libraryTime() == 0);
+  const uint32_t today = 1800000000;
+  wall = today - 86400;
+  assert(libraryTime() == wall);
+  std::vector<uint8_t> hello(5); hello[0] = kVersion; writeU32(hello.data()+1,today);
+  command(Hello, hello);
+  assert(libraryTime() == today);
+  resetReason = ESP_RST_DEEPSLEEP;
+  ticks += 5400;
+  begin(host);
+  assert(libraryTime() == today + 5400);
+  resetReason = ESP_RST_SW;
+  ticks += 65;
+  begin(host);
+  assert(libraryTime() == today + 5465);
+  const char* path = "/Articles/0100000000000000.epub";
+  files[path] = "article";
+  assert(library::touches::initialize(nullptr, 0));
+  assert(library::touches::record(path, 0, libraryTime()));
+  uint32_t touched;
+  assert(library::touches::readTimestamp(path, touched) && touched == today + 5465);
+  std::vector<uint8_t> bump(12); bump[0]=1; writeU32(bump.data()+8, 123);
+  ++ticks; command(Touch,bump); expectStatus(TouchResult,Ok);
+  assert(library::touches::readTimestamp(path, touched) && touched == today + 5466);
+  ++ticks; command(Touch,bump); expectStatus(TouchResult,Ok);
+  assert(library::touches::readTimestamp(path, touched) && touched == today + 5466);
+  resetReason = ESP_RST_POWERON;
+  begin(host);
+  assert(libraryTime() == wall);
+  files.erase(path);
   std::string image(10000,'A'); image[0]=char(0xe9);
   std::vector<uint8_t> begin(40);
   writeU32(begin.data(),image.size());
@@ -120,4 +163,5 @@ int main() {
 }
 '''
 incoming = extract("struct Incoming {") + ";\nIncoming incoming;\n"
-output.write_text(prefix + incoming + "\n".join(map(extract, functions)) + checks)
+clock = extract("struct PhoneClock {") + ";\nPhoneClock phoneClock{};\n"
+output.write_text(prefix + clock + incoming + "\n".join(map(extract, functions)) + checks)

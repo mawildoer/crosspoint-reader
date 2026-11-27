@@ -44,5 +44,7 @@ void forgetPhone();
 Status status();
 // Changes whenever the article store changes; list screens reload on a new value.
 uint32_t storeGeneration();
+// Unix seconds for library history, or zero before a clock is available.
+uint32_t libraryTime();
 
 }  // namespace phonesync

@@ -136,7 +136,14 @@ Added/Published values. Load an article before bumping it. New firmware incremen
 its store-generation signal so an idle Library refreshes the ordering.
 
 Firmware keeps a clock-independent sequence per path, persisted with a reserved
-counter. Opening a successfully rendered book or article also touches it. The
+counter. Opening a successfully rendered book or article also touches it. From
+0.4.1, PCT2 records add a Unix timestamp before the checksum. Valid PCT1
+records keep their sequence and nonce until the next write. Their timestamp is
+unknown. A duplicate phone nonce preserves both the sequence and the date.
+The Touched view shows article touch times in the reader's configured timezone.
+A valid HELLO supplies the reference for touch times. The reader advances it
+using its RTC counter, including time spent asleep, and falls back to its own
+clock after power loss. Physical sleep/wake timing on X3 awaits verification. The
 three reader views are Touched, Added, Published, newest first. The sleep screen
 uses upright dark Paperboy artwork on white as an 18,432-byte monochrome bitmap. Generate it from
 `src/images/PaperboyIcon.png` using `scripts/generate_paperboy_logo.py`.

@@ -186,7 +186,7 @@ bool contains(const char* idHex) {
   return ctx.found;
 }
 
-bool lookup(const char* idHex, Entry& out) {
+bool lookup(const char* idHex, Entry& out, bool* scanOk) {
   bool found = false;
   out = Entry{};
   const bool ok = readLines(kIndexPath, [&](char* line) {
@@ -202,6 +202,7 @@ bool lookup(const char* idHex, Entry& out) {
     found = true;
     return false;
   });
+  if (scanOk) *scanOk = ok;
   return ok && found;
 }
 
@@ -225,6 +226,18 @@ void formatDate(uint32_t timestamp, std::string& result) {
   if (gmtime_r(&stamp, &date)) {
     char formatted[16];
     snprintf(formatted, sizeof(formatted), "%04d-%02d-%02d", date.tm_year + 1900, date.tm_mon + 1, date.tm_mday);
+    result = formatted;
+  }
+}
+
+void formatTouchTime(uint32_t timestamp, bool use12Hour, std::string& result) {
+  result.clear();
+  if (timestamp == 0) return;
+  const time_t stamp = timestamp;
+  tm local{};
+  char formatted[20];
+  if (localtime_r(&stamp, &local) &&
+      strftime(formatted, sizeof(formatted), use12Hour ? "%Y-%m-%d %I:%M %p" : "%Y-%m-%d %H:%M", &local)) {
     result = formatted;
   }
 }

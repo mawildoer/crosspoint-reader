@@ -89,7 +89,7 @@ If the frontlight doesn't come back on after the device wakes from sleep, check 
 
 ## Paperboy reading Home
 
-This fork opens the Library for Home. Articles and books are mixed in the same Touched/Added/Published lists. Articles use a lined-paper icon with their author, source and publication date; books retain their existing rows. New article deliveries and deletions refresh the library after the sync settles.
+This fork opens the Library for Home. Articles and books are mixed in the same Touched/Added/Published lists. Articles use a lined-paper icon with their author, source and date; books retain their existing rows. New article deliveries and deletions refresh the library after the sync settles.
 
 Press Back from the Library tab strip (after clearing any search/group state), or hold Back from a list, to open Menu. Settings, file browsing, transfers, index refresh and phone pairing live there. Touch devices use the leading header control. Reader resume stays unchanged.
 
@@ -117,7 +117,7 @@ Upon turning the device on for the first time, you will be placed on the **[Home
 
 ### 3.1 Home Screen
 
-In Paperboy, Home opens the **[Library](#34-library-screen)**. Books and synced articles share one list. Articles use a lined-paper icon and show author, source, and publication date when available. Open any row to read or resume it.
+In Paperboy, Home opens the **[Library](#34-library-screen)**. Books and synced articles share one list. Articles use a lined-paper icon and show author and source. Touched shows the last open or applied bump time. The other views show the publication date when available. Open any row to read or resume it.
 
 Press **Back** at the tab strip, or hold **Back** from within the list, to open **Menu**. It provides **[Settings](#36-settings)**, **[Browse Files](#33-browse-files-screen)**, **[File Transfer](#35-file-transfer-screen)**, **Refresh Library**, and **Pair a New Phone**. Touch devices also have a menu button in the header.
 
@@ -138,7 +138,7 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 The Library indexes up to 4,096 supported books and articles on the SD card without requiring you to remember their folders. Its three tabs provide newest-first views. Each view uses a downward arrow for newest first:
 
-- **Touched** places the most recently opened or phone-bumped item first. Existing recent reads are migrated on the first boot. Untouched items follow Added order. Bumping changes priority without resetting reading position.
+- **Touched** places the most recently opened or phone-bumped item first. Article rows show the local date and time the reader last opened them or applied a phone bump. Older history and opens before a clock is available have a blank date. Their order is still remembered. Existing recent reads are migrated on the first boot. Untouched items follow Added order. Bumping changes priority without resetting reading position.
 - **Added** orders books and articles by arrival date and time, newest first. New articles use the phone time at delivery; books and older articles use available file timestamps and discovery order.
 - **Published** orders articles by publication date and time, newest first. Undated items follow after dated articles.
 

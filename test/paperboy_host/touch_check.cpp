@@ -1,10 +1,18 @@
 #include <HalStorage.h>
+#include <LibraryFormat.h>
 #include <LibraryTouchStore.h>
 
 #include <cassert>
 namespace library {
 bool markLibraryIndexDirty() { return true; }
 }  // namespace library
+namespace {
+uint32_t timestamp(const char* path) {
+  uint32_t seconds;
+  assert(library::touches::readTimestamp(path, seconds));
+  return seconds;
+}
+}  // namespace
 void checkTouches() {
   using namespace library::touches;
   files.clear();
@@ -13,19 +21,37 @@ void checkTouches() {
   files["/newer.epub"] = "another EPUB";
   const char* paths[] = {"/newer.epub", "/older.epub"};
   assert(initialize(paths, 2));
+  // Simulate an existing card with checked PCT1 records and a pending old phone nonce.
+  for (auto& [path, bytes] : files) {
+    if (!path.starts_with("/.crosspoint/library-touches/") || bytes.size() != 20) continue;
+    uint32_t legacy[4] = {0x31544350, 0, 0, 0};
+    memcpy(&legacy[1], bytes.data() + 4, 8);
+    if (legacy[1] == 1) legacy[2] = 8;
+    legacy[3] = static_cast<uint32_t>(library::clixPathHash(reinterpret_cast<const char*>(legacy), 12));
+    bytes.assign(reinterpret_cast<const char*>(legacy), sizeof(legacy));
+  }
+  assert(timestamp(paths[1]) == 0);
+  assert(record(paths[1], 8, 1800000000));
+  assert(timestamp(paths[1]) == 0);
   uint32_t old, fresh, revisionBefore;
   assert(lookup(paths[1], old) && old == 1);
   assert(lookup(paths[0], fresh) && fresh == 2);
-  assert(record(paths[1], 10));
+  assert(record(paths[1], 10, 1800000001));
+  assert(timestamp(paths[1]) == 1800000001);
   assert(lookup(paths[1], old) && old == 3);
-  assert(record(paths[0]));
+  assert(record(paths[0], 0, 1800000002));
+  assert(timestamp(paths[0]) == 1800000002);
   assert(lookup(paths[0], fresh) && fresh == 4);
   assert(record(paths[1], 10));
   assert(lookup(paths[1], old) && old == 3);  // Lost ACK must not undo a later open.
-  assert(record(paths[1], 11));
+  assert(record(paths[1], 11, 1800000003));
   assert(lookup(paths[1], old) && old == 5);
   assert(initialize(paths, 2));
   assert(lookup(paths[1], old) && old == 5);
+  assert(record(paths[1], 0, 1800000060));
+  assert(record(paths[1], 11, 1800000120));
+  assert(timestamp(paths[1]) == 1800000060);
+  assert(lookup(paths[1], old) && old == 6);
   assert(files["/older.epub"] == "original EPUB with saved progress");
   assert(revision(revisionBefore));
   shortWrite = true;

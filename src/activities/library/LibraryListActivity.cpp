@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -124,6 +125,7 @@ void LibraryListActivity::onEnter() {
   if (index.isOpen() && index.dedupDegraded()) {
     LOG_ERR("LIB", "index was built without duplicate detection");
   }
+  winArticleMetadata.clear();
   articleFolder = index.findFolderId("/Articles");
   articleRefresh.reset(phonesync::storeGeneration());
 
@@ -313,6 +315,7 @@ void LibraryListActivity::promptRebuildIndex() {
 }
 
 void LibraryListActivity::resetAfterRebuild() {
+  winArticleMetadata.clear();
   articleFolder = index.findFolderId("/Articles");
   // Sort positions, group starts all point into the old order.
   applyFilter();
@@ -856,16 +859,31 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
       char articleId[phonesync::store::kIdHexLen + 1];
       isArticle = phonesync::store::idOfPath(rowFile.c_str(), articleId);
       if (isArticle) {
-        auto& metadata = winArticleMetadata[static_cast<size_t>(rows)];
-        if (phonesync::store::lookup(articleId, metadata)) {
-          if (!metadata.title.empty()) title = metadata.title;
+        auto& cached = winArticleMetadata[static_cast<size_t>(rows)];
+        auto& metadata = cached.metadata;
+        if (strcmp(metadata.id, articleId) != 0) {
+          cached.touchLoaded = false;
+          bool scanOk;
+          cached.hasMetadata = phonesync::store::lookup(articleId, metadata, &scanOk);
+          // Remember confirmed misses until the next rebuild. I/O failures retry on repaint.
+          if (scanOk && !cached.hasMetadata) memcpy(metadata.id, articleId, sizeof(metadata.id));
+        }
+        if (!metadata.title.empty()) title = metadata.title;
+        if (cached.hasMetadata) {
           phonesync::store::formatSubtitle(metadata, detail);
-          auto& date = winDates[static_cast<size_t>(rows)];
-          phonesync::store::formatDate(metadata.time, date);
-          if (!date.empty()) item.value = date.c_str();
         } else {
           detail = author;
         }
+        auto& date = winDates[static_cast<size_t>(rows)];
+        if (sortOrder == library::SortOrder::TouchedDesc) {
+          if (!cached.touchLoaded) {
+            cached.touchLoaded = library::touches::readTimestamp(rowFile.c_str(), cached.touchedAt);
+          }
+          phonesync::store::formatTouchTime(cached.touchedAt, SETTINGS.clockFormat == 1, date);
+        } else {
+          phonesync::store::formatDate(metadata.time, date);
+        }
+        if (!date.empty()) item.value = date.c_str();
       } else if (!authorGrouped) {
         detail = author;
       }

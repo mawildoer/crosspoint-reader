@@ -795,9 +795,12 @@ exposes only Touched, Added, Published, all descending. Touched ties/untouched r
 use Added ranks. A touch-generation change defeats unchanged-file reuse, including
 counter gaps from an interrupted update.
 
-`/.crosspoint/library-touches/counter` and one 16-byte record per complete-path
-FNV fingerprint, sharded under two one-hex-digit subdirectories contain little-endian magic PCT1, sequence u32, last phone bump
-nonce u32, and an FNV checksum over the first 12 bytes (low u32). The counter
+`/.crosspoint/library-touches/counter` and the per-path records use little-endian
+fields. Each path's FNV fingerprint selects its record under two one-hex-digit
+subdirectories. PCT2 stores the four-byte magic, sequence u32, last phone bump
+nonce u32, touch Unix seconds u32 (zero means unknown), and the low u32 of
+FNV-1a over the first 16 bytes. Readers also accept checked 16-byte PCT1
+records, which lack the timestamp and checksum only the first 12 bytes. The counter
 reserves a monotonically increasing sequence before publishing the book record.
 Recent reads are seeded oldest to newest once. No book/article payload or reading
 position is stored in these records. The history uses no per-library RAM cache.
@@ -816,5 +819,5 @@ bytes per book (maximum 8 KiB); timestamp keys remain four bytes per book and ar
 released between permutations. Touched reads one fixed sidecar per indexed path, with two 16-way shard levels
 limiting repeated FAT directory scans;
 article metadata still uses the existing rebuild-scoped snapshot. The index gains
-two SD bytes per book. Counter/record I/O occurs only on open or explicit bump,
-not on every page turn.
+two SD bytes per book. Opens and applied phone bumps write history once. The Touched view also reads
+the displayed article records and reuses their times on selection repaints.

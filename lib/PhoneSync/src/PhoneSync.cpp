@@ -1,5 +1,15 @@
 #include "PhoneSync.h"
 
+#include <ctime>
+
+namespace {
+// The reader clock may still count from 1970 before its first time sync.
+constexpr uint32_t MIN_LIBRARY_EPOCH = 1735689600;  // 2025-01-01 UTC
+uint32_t libraryEpoch(const int64_t seconds) {
+  return seconds >= MIN_LIBRARY_EPOCH && seconds <= UINT32_MAX ? static_cast<uint32_t>(seconds) : 0;
+}
+}  // namespace
+
 #if defined(PHONESYNC_BLE) && PHONESYNC_BLE
 
 #include <HalMemory.h>
@@ -10,6 +20,8 @@
 #include <Memory.h>
 #include <NimBLEDevice.h>
 #include <esp_attr.h>
+#include <esp_rtc_time.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
@@ -67,6 +79,17 @@ uint32_t lastFrameMs = 0;
 uint32_t generation = 1;
 uint32_t phoneTime = 0;
 uint32_t phoneTimeAtMs = 0;
+// The RTC counter runs through deep sleep and software restarts, independently of wall-clock corrections.
+struct PhoneClock {
+  uint32_t epoch;
+  uint32_t rtcSeconds;
+  uint32_t check;
+
+  uint32_t checksum() const { return epoch ^ rtcSeconds ^ 0x50425431u; }
+};
+RTC_NOINIT_ATTR PhoneClock phoneClock;
+
+uint32_t rtcSeconds() { return static_cast<uint32_t>(esp_rtc_get_time_us() / 1000000); }
 uint16_t receivedThisBoot = 0;
 
 std::atomic<bool> linked{false};
@@ -169,6 +192,11 @@ void onHello(const uint8_t* payload, const size_t len) {
   if (len == 5) {
     phoneTime = readU32(payload + 1);
     phoneTimeAtMs = nowMs();
+    if (libraryEpoch(phoneTime)) {
+      phoneClock.epoch = phoneTime;
+      phoneClock.rtcSeconds = rtcSeconds();
+      phoneClock.check = phoneClock.checksum();
+    }
   }
   if (len < 1 || payload[0] != kVersion) LOG_INF("SYNC", "phone speaks protocol %u", len ? payload[0] : 0);
   uint8_t frame[64] = {HelloAck,
@@ -493,7 +521,7 @@ void handleFrame(const uint8_t* frame, const size_t len) {
       }
       char id[store::kIdHexLen + 1];
       idToHex(payload, id);
-      const bool ok = library::touches::record(store::pathFor(id).c_str(), readU32(payload + 8));
+      const bool ok = library::touches::record(store::pathFor(id).c_str(), readU32(payload + 8), libraryTime());
       if (ok) ++generation;
       sendStatus(TouchResult, ok ? Ok : StorageError);
       break;
@@ -696,6 +724,8 @@ bool byeLingerOver() { return byeAtMs != 0 && nowMs() - byeAtMs >= kByeLingerMs;
 }  // namespace
 
 void begin(const Host& h) {
+  const auto reset = esp_reset_reason();
+  if (reset != ESP_RST_DEEPSLEEP && reset != ESP_RST_SW) phoneClock = {};
   host = h;
   begun = true;
 }
@@ -800,6 +830,14 @@ Status status() {
 }
 uint32_t storeGeneration() { return generation; }
 
+uint32_t libraryTime() {
+  const auto rtc = rtcSeconds();
+  if (libraryEpoch(phoneClock.epoch) && phoneClock.check == phoneClock.checksum() && rtc >= phoneClock.rtcSeconds) {
+    return libraryEpoch(static_cast<int64_t>(phoneClock.epoch) + (rtc - phoneClock.rtcSeconds));
+  }
+  return libraryEpoch(time(nullptr));
+}
+
 }  // namespace phonesync
 
 #else
@@ -812,6 +850,7 @@ void syncBeforeSleep() {}
 void forgetPhone() {}
 Status status() { return {false, false, false, false, false, 0}; }
 uint32_t storeGeneration() { return 0; }
+uint32_t libraryTime() { return libraryEpoch(time(nullptr)); }
 }  // namespace phonesync
 
 #endif

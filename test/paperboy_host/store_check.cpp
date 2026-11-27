@@ -85,6 +85,14 @@ int main() {
   std::string date;
   store::formatDate(entry.time, date);
   assert(date == "2026-11-15");
+  setenv("TZ", "PST8", 1);
+  tzset();
+  store::formatTouchTime(1794744000, false, date);
+  assert(date == "2026-11-15 04:00");
+  store::formatTouchTime(1794744000 + 12 * 3600, true, date);
+  assert(date == "2026-11-15 04:00 PM");
+  store::formatTouchTime(0, true, date);
+  assert(date.empty());
   store::formatDate(0, date);
   assert(date.empty());
   assert(!store::lookup("fedcba9876543210", entry));
